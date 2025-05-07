@@ -1,5 +1,7 @@
 extern crate rbtrack;
 
-fn main() {
+use rbtrack::common::errors;
 
+fn main() {
+    
 }

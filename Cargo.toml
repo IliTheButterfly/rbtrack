@@ -1,9 +1,17 @@
 [package]
-name = "rbtrack-core"
+name = "rbtrack"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+egui ="0.31.1"
+serde = "1.0.219"
+petgraph = "0.8.1"
+uuid = { version = "1.16.0", features = ["v4"]}
+variation = "0.1.1"
+opencv = "0.94.4"
+lazy_static = "1.5.0"
+once_cell = "1.21.3"
 
 [lib]
 name = "rbtrack"
