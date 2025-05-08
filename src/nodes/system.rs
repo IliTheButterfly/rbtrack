@@ -14,32 +14,31 @@ enum PortType {
     Output,
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 #[derive(Variation)]
 pub enum Value {
+    // Base types
     Boolean(bool),
+    Word(u16),
     Int(i32),
     Float(f32),
     String(String),
     UUID(Uuid),
+
+    // Points
+    Point2I(opencv::core::Point2i),
+    Point2F(opencv::core::Point2f),
+    Point3I(opencv::core::Point3i),
+    Point3F(opencv::core::Point3f),
+
+    // Vectors
     Vector1B(opencv::core::Mat),
     Vector2B(opencv::core::Mat),
     Vector3B(opencv::core::Mat),
     Vector4B(opencv::core::Mat),
+    Vector1W(opencv::core::Mat),
+    Vector2W(opencv::core::Mat),
+    Vector3W(opencv::core::Mat),
+    Vector4W(opencv::core::Mat),
     Vector1I(opencv::core::Mat),
     Vector2I(opencv::core::Mat),
     Vector3I(opencv::core::Mat),
@@ -48,16 +47,81 @@ pub enum Value {
     Vector2F(opencv::core::Mat),
     Vector3F(opencv::core::Mat),
     Vector4F(opencv::core::Mat),
+
+    // Matrices
+    Mat44F(opencv::core::Matx44f),
+    Mat33F(opencv::core::Matx33f),
+
+    // Any other matrix
+    Mat(opencv::core::Mat),
+
+    // Rects
     Rect2I(opencv::core::Rect2i),
     Rect2F(opencv::core::Rect2f),
+
+    // Sizes
     Size2I(opencv::core::Size2i),
     Size2F(opencv::core::Size2f),
-    Mat(opencv::core::Mat),
+
+    // Recursion
+    Variant(Box<Variant>),
+
+    // Custom
     Custom(Box<dyn Any + Send + Sync>),
 }
 
 impl Value {
+    pub const Transform4F: fn(opencv::core::Matx44f) -> Value = Value::Mat44F;
+
+    pub fn inner_type_id(&self) -> TypeId {
+        match self {
+            Value::Boolean(_) => TypeId::of::<bool>(),
+            Value::Word(_) => TypeId::of::<u16>(),
+            Value::Int(_) => TypeId::of::<i32>(),
+            Value::Float(_) => TypeId::of::<f32>(),
+            Value::String(_) => TypeId::of::<String>(),
+            Value::UUID(_) => TypeId::of::<Uuid>(),
+    
+            Value::Point2I(_) => TypeId::of::<opencv::core::Point2i>(),
+            Value::Point2F(_) => TypeId::of::<opencv::core::Point2f>(),
+            Value::Point3I(_) => TypeId::of::<opencv::core::Point3i>(),
+            Value::Point3F(_) => TypeId::of::<opencv::core::Point3f>(),
+    
+            Value::Vector1B(_) => TypeId::of::<opencv::core::Mat1b>(),
+            Value::Vector2B(_) => TypeId::of::<opencv::core::Mat2b>(),
+            Value::Vector3B(_) => TypeId::of::<opencv::core::Mat3b>(),
+            Value::Vector1W(_) => TypeId::of::<opencv::core::Mat1w>(),
+            Value::Vector2W(_) => TypeId::of::<opencv::core::Mat2w>(),
+            Value::Vector3W(_) => TypeId::of::<opencv::core::Mat3w>(),
+            Value::Vector4W(_) => TypeId::of::<opencv::core::Mat4w>(),
+            Value::Vector4B(_) => TypeId::of::<opencv::core::Mat4b>(),
+            Value::Vector1I(_) => TypeId::of::<opencv::core::Mat1i>(),
+            Value::Vector2I(_) => TypeId::of::<opencv::core::Mat2i>(),
+            Value::Vector3I(_) => TypeId::of::<opencv::core::Mat3i>(),
+            Value::Vector4I(_) => TypeId::of::<opencv::core::Mat4i>(),
+            Value::Vector1F(_) => TypeId::of::<opencv::core::Mat1f>(),
+            Value::Vector2F(_) => TypeId::of::<opencv::core::Mat2f>(),
+            Value::Vector3F(_) => TypeId::of::<opencv::core::Mat3f>(),
+            Value::Vector4F(_) => TypeId::of::<opencv::core::Mat4f>(),
+    
+            Value::Mat44F(_) => TypeId::of::<opencv::core::Matx44f>(),
+            Value::Mat33F(_) => TypeId::of::<opencv::core::Matx33f>(),
+    
+            Value::Mat(_) => TypeId::of::<opencv::core::Mat>(),
+    
+            Value::Rect2I(_) => TypeId::of::<opencv::core::Rect2i>(),
+            Value::Rect2F(_) => TypeId::of::<opencv::core::Rect2f>(),
+    
+            Value::Size2I(_) => TypeId::of::<opencv::core::Size2i>(),
+            Value::Size2F(_) => TypeId::of::<opencv::core::Size2f>(),
+    
+            Value::Variant(b) => (*b).type_id(),
+
+            Value::Custom(b) => (*b).type_id(),
+        }
+    }
 }
+
 
 type ConversionFn = Box<dyn Fn(&Value) -> Option<Value> + Send + Sync>;
 
@@ -82,34 +146,7 @@ where
 }
 
 pub fn convert(value: &Value, to: TypeId) -> Option<Value> {
-    let from = match value {
-        Value::Boolean(_) => TypeId::of::<bool>(),
-        Value::Int(_) => TypeId::of::<i32>(),
-        Value::Float(_) => TypeId::of::<f32>(),
-        Value::String(_) => TypeId::of::<String>(),
-        Value::UUID(_) => TypeId::of::<Uuid>(),
-        Value::Vector1B(_) => TypeId::of::<opencv::core::Mat1b>(),
-        Value::Vector2B(_) => TypeId::of::<opencv::core::Mat2b>(),
-        Value::Vector3B(_) => TypeId::of::<opencv::core::Mat3b>(),
-        Value::Vector4B(_) => TypeId::of::<opencv::core::Mat4b>(),
-        Value::Vector1I(_) => TypeId::of::<opencv::core::Mat1i>(),
-        Value::Vector2I(_) => TypeId::of::<opencv::core::Mat2i>(),
-        Value::Vector3I(_) => TypeId::of::<opencv::core::Mat3i>(),
-        Value::Vector4I(_) => TypeId::of::<opencv::core::Mat4i>(),
-        Value::Vector1F(_) => TypeId::of::<opencv::core::Mat1f>(),
-        Value::Vector2F(_) => TypeId::of::<opencv::core::Mat2f>(),
-        Value::Vector3F(_) => TypeId::of::<opencv::core::Mat3f>(),
-        Value::Vector4F(_) => TypeId::of::<opencv::core::Mat4f>(),
-        Value::Rect2I(_) => TypeId::of::<opencv::core::Rect2i>(),
-        Value::Rect2F(_) => TypeId::of::<opencv::core::Rect2f>(),
-        Value::Size2I(_) => TypeId::of::<opencv::core::Size2i>(),
-        Value::Size2F(_) => TypeId::of::<opencv::core::Size2f>(),
-        Value::Mat(_) => TypeId::of::<opencv::core::Mat>(),
-        Value::Custom(b) => (*b).type_id(),
-    };
-    
-
-    CONVERSIONS.read().unwrap().get(&(from, to)).and_then(|f| f(value))
+    CONVERSIONS.read().unwrap().get(&(value.inner_type_id(), to)).and_then(|f| f(value))
 }
 
 #[derive(Variation)]
@@ -124,16 +161,16 @@ macro_rules! impl_value_conversion {
         impl TryFrom<&Value> for $t {
             type Error = &'static str;
             fn try_from(v: &Value) -> Result<Self, Self::Error> {
-                match v {
-                    Value::$variant(inner) => Ok(*inner),
-                    _ => Err("Type mismatch"),
+                match <$t>::from_value(v) {
+                    Some(r) => Ok(r),
+                    None => Err("Type mismatch"),
                 }
             }
         }
 
         impl From<$t> for Value {
             fn from(v: $t) -> Self {
-                Value::$variant(v)
+                v.to_value()
             }
         }
     };
@@ -178,79 +215,81 @@ macro_rules! register_value_type {
 }
 
 macro_rules! register_mat {
-    (dim $actual:ident, $($dims:literal),+) => (register_mat!(dim_mid $actual, 0, $($dims),+));
-    (dim_mid $actual:ident, $index:expr, $dims:literal) => ($actual.dims() > $index && $actual.get($index).unwrap() == $dims);
-    (dim_mid $actual:ident, $index:expr, $dims:literal, $($dims2:literal),+) => {
-        register_mat!(dim_mid $actual, $index, $dims) && register_mat!(dim_mid $actual, $index + 1, $($dims2),+)
+    // Dimension Condition
+    (dim $self:ident, $($dims:literal),+) => (register_mat!(dim_mid $self, 0, $($dims),+));
+    (dim_mid $self:ident, $index:expr, $dims:literal) => ($self.mat_size().dims() > $index && $self.mat_size().get($index).unwrap() == $dims);
+    (dim_mid $self:ident, $index:expr, $dims:literal, $($dims2:literal),+) => {
+        register_mat!(dim_mid $self, $index, $dims) && register_mat!(dim_mid $self, $index + 1, $($dims2),+)
     };
 
-    (typ_id $({$t:ty, $variant:ident, $($dims:literal),+}),+) => {
+    // type_id implementation
+    (typ_id $({$t:ty, $variant:ident, $cv_t:expr, $($dims:literal),+}),+) => {
         fn type_id(&self) -> TypeId {
-            let actual = self.mat_size();
-            register_mat!(typ_id_mid actual, $({$t, $variant, $($dims),+}),+);
+            register_mat!(typ_id_mid self, $({$t, $variant, $cv_t, $($dims),+}),+);
             TypeId::of::<opencv::core::Mat>()
         }
     };
-    (typ_id_impl $actual:ident, $t:ty, $variant:ident, $($dims:literal),+) => {
-        if register_mat!(dim $actual, $($dims),+) {
+    (typ_id_impl $self:ident, $t:ty, $variant:ident, $cv_t:expr, $($dims:literal),+) => {
+        if $self.typ() == $cv_t && register_mat!(dim $self, $($dims),+) {
             return TypeId::of::<$t>();
         }
     };
-    (typ_id_mid $actual:ident, {$t:ty, $variant:ident, $($dims:literal),+}, $({$t2:ty, $variant2:ident, $($dims2:literal),+}),+) => {
-        register_mat!(typ_id_impl $actual, $t, $variant, $($dims), +);
-        register_mat!(typ_id_mid $actual, $({$t2, $variant2, $($dims2), +}), +)
+    (typ_id_mid $self:ident, {$t:ty, $variant:ident, $cv_t:expr, $($dims:literal),+}, $({$t2:ty, $variant2:ident, $cv_t2:expr, $($dims2:literal),+}),+) => {
+        register_mat!(typ_id_impl $self, $t, $variant, $cv_t, $($dims), +);
+        register_mat!(typ_id_mid $self, $({$t2, $variant2, $cv_t2, $($dims2), +}), +)
     };
-    (typ_id_mid $actual:ident, {$t:ty, $variant:ident, $($dims:literal),+}) => {
-        register_mat!(typ_id_impl $actual, $t, $variant, $($dims), +)
+    (typ_id_mid $self:ident, {$t:ty, $variant:ident, $cv_t:expr, $($dims:literal),+}) => {
+        register_mat!(typ_id_impl $self, $t, $variant, $cv_t, $($dims), +)
     };
 
-    (to_val {$t:ty, $variant:ident, $($dims:literal),+}) => {
+    // to_value implementation
+    (to_val $({$t:ty, $variant:ident, $cv_t:expr, $($dims:literal),+}),+) => {
         fn to_value(&self) -> Value {
-            register_mat!(to_val_mid $({$t, $variant, $($dims),+}),+)
+            register_mat!(to_val_mid self, $({$t, $variant, $cv_t, $($dims),+}),+);
+            Value::Mat(self.clone())
         }
     };
-    (to_val_impl {$t:ty, $variant:ident, $($dims:literal),+}) => {
-        Value::$variant(self.clone())
+    (to_val_impl $self:ident, $t:ty, $variant:ident, $cv_t:expr, $($dims:literal),+) => {
+        if $self.typ() == $cv_t && register_mat!(dim $self, $($dims),+) {
+            return Value::$variant($self.clone());
+        }
     };
-    (to_val_mid {$t:ty, $variant:ident, $($dims:literal),+}, $({$t2:ty, $variant2:ident, $($dims2:literal),+}),+) => {
-        register_mat!(to_val_impl, {$t, $variant, $($dims), +})
-        register_mat!(to_val_mid $({$t2, $variant2, $($dims2), +}), +)
+    (to_val_mid $self:ident, {$t:ty, $variant:ident, $cv_t:expr, $($dims:literal),+}, $({$t2:ty, $variant2:ident, $cv_t2:expr, $($dims2:literal),+}),+) => {
+        register_mat!(to_val_impl $self, $t, $variant, $cv_t, $($dims), +);
+        register_mat!(to_val_mid $self, $({$t2, $variant2, $cv_t2, $($dims2), +}), +);
     };
-    (to_val_mid {$t:ty, $variant:ident, $($dims:literal),+}) => {
-        register_mat!(to_val_impl, {$t, $variant, $($dims), +})
+    (to_val_mid $self:ident, {$t:ty, $variant:ident, $cv_t:expr, $($dims:literal),+}) => {
+        register_mat!(to_val_impl $self, $t, $variant, $cv_t, $($dims), +);
     };
 
-    (from_val {$t:ty, $variant:ident, $($dims:literal),+}) => {
+    // from_value implentation
+    (from_val $({$t:ty, $variant:ident, $cv_t:expr, $($dims:literal),+}),+) => {
         fn from_value(value: &Value) -> Option<Self> {
-            register_mat!(from_val_mid $({$t, $variant, $($dims),+}),+)
-        }
-    };
-    (from_val_impl {$t:ty, $variant:ident, $($dims:literal),+}) => {
-        if let Value::$variant(v) = value {
-            Some(v.clone())
-        } else {
+            register_mat!(from_val_mid value, $({$t, $variant, $cv_t, $($dims),+}),+);
+            if let Value::Mat(v) = value {
+                return Some(v.clone());
+            }
             None
         }
     };
-    (from_val_mid {$t:ty, $variant:ident, $($dims:literal),+}, $({$t2:ty, $variant2:ident, $($dims2:literal),+}),+) => {
-        register_mat!(from_val_impl, {$t, $variant, $($dims), +});
-        register_mat!(from_val_mid $({$t2, $variant2, $($dims2), +}), +)
+    (from_val_impl $value:ident, {$t:ty, $variant:ident, $cv_t:expr, $($dims:literal),+}) => {
+        if let Value::$variant(v) = $value {
+            return Some(v.clone());
+        }
     };
-    (from_val_mid {$t:ty, $variant:ident, $($dims:literal),+}) => {
-        register_mat!(from_val_impl, {$t, $variant, $($dims), +})
+    (from_val_mid $value:ident, {$t:ty, $variant:ident, $cv_t:expr, $($dims:literal),+}, $({$t2:ty, $variant2:ident, $cv_t2:expr, $($dims2:literal),+}),+) => {
+        register_mat!(from_val_impl $value, {$t, $variant, $cv_t, $($dims), +});
+        register_mat!(from_val_mid $value, $({$t2, $variant2, $cv_t2, $($dims2), +}), +);
+    };
+    (from_val_mid $value:ident, {$t:ty, $variant:ident, $cv_t:expr, $($dims:literal),+}) => {
+        register_mat!(from_val_impl $value, {$t, $variant, $cv_t, $($dims), +});
     };
 
-    ($({$t:ty, $variant:ident, $($dims:literal),+}),+) => {
+    ($({$t:ty, $variant:ident, $cv_t:expr, $($dims:literal),+}),+) => {
         impl ValueType for opencv::core::Mat {
-            register_mat!(typ_id $({$t, $variant, $($dims), +}), +);
-            fn from_value(value: &Value) -> Option<Self> {
-                None
-            }
-            fn to_value(&self) -> Value {
-                Value::Int(1)
-            }
-            // register_mat!(from_val $({$t, $variant, $($dims), +}), +)
-            // register_mat!(to_val $({$t, $variant, $($dims), +}), +)
+            register_mat!(typ_id $({$t, $variant, $cv_t, $($dims), +}), +);
+            register_mat!(to_val $({$t, $variant, $cv_t, $($dims), +}), +);
+            register_mat!(from_val $({$t, $variant, $cv_t, $($dims), +}), +);
         }
     };
 }
@@ -289,25 +328,47 @@ macro_rules! register_conversion {
 }
 
 register_value_type!(bool, Boolean);
+register_value_type!(u16, Word);
 register_value_type!(i32, Int);
 register_value_type!(f32, Float);
 register_value_type!(String, String);
 register_value_type!(Uuid, UUID);
 
 register_mat!(
-    { opencv::core::Mat1b, Vector1B, 1 },
-    { opencv::core::Mat2b, Vector2B, 2 },
-    { opencv::core::Mat3b, Vector3B, 3 },
-    { opencv::core::Mat4b, Vector4B, 4 },
-    { opencv::core::Mat1i, Vector1I, 1 },
-    { opencv::core::Mat2i, Vector2I, 2 },
-    { opencv::core::Mat3i, Vector3I, 3 },
-    { opencv::core::Mat4i, Vector4I, 4 },
-    { opencv::core::Mat1f, Vector1F, 1 },
-    { opencv::core::Mat2f, Vector2F, 2 },
-    { opencv::core::Mat3f, Vector3F, 3 },
-    { opencv::core::Mat4f, Vector4F, 4 }
+    { opencv::core::Mat1b, Vector1B, opencv::core::CV_8U, 1 },
+    { opencv::core::Mat2b, Vector2B, opencv::core::CV_8U, 2 },
+    { opencv::core::Mat3b, Vector3B, opencv::core::CV_8U, 3 },
+    { opencv::core::Mat4b, Vector4B, opencv::core::CV_8U, 4 },
+    { opencv::core::Mat1w, Vector1W, opencv::core::CV_16U, 1 },
+    { opencv::core::Mat2w, Vector2W, opencv::core::CV_16U, 2 },
+    { opencv::core::Mat3w, Vector3W, opencv::core::CV_16U, 3 },
+    { opencv::core::Mat4w, Vector4W, opencv::core::CV_16U, 4 },
+    { opencv::core::Mat1i, Vector1I, opencv::core::CV_32S, 1 },
+    { opencv::core::Mat2i, Vector2I, opencv::core::CV_32S, 2 },
+    { opencv::core::Mat3i, Vector3I, opencv::core::CV_32S, 3 },
+    { opencv::core::Mat4i, Vector4I, opencv::core::CV_32S, 4 },
+    { opencv::core::Mat1f, Vector1F, opencv::core::CV_32F, 1 },
+    { opencv::core::Mat2f, Vector2F, opencv::core::CV_32F, 2 },
+    { opencv::core::Mat3f, Vector3F, opencv::core::CV_32F, 3 },
+    { opencv::core::Mat4f, Vector4F, opencv::core::CV_32F, 4 }
+    // { mat opencv::core::Matx33f, Mat33F, opencv::core::CV_32F, 3, 3 },
+    // { mat opencv::core::Matx44f, Mat44F, opencv::core::CV_32F, 4, 4 }
 );
+
+// register_mat!(
+//     // { opencv::core::Mat1b, Vector1B, opencv::core::CV_8U, 1 },
+//     // { opencv::core::Mat2b, Vector2B, opencv::core::CV_8U, 2 },
+//     // { opencv::core::Mat3b, Vector3B, opencv::core::CV_8U, 3 },
+//     // { opencv::core::Mat4b, Vector4B, opencv::core::CV_8U, 4 },
+//     // { opencv::core::Mat1i, Vector1I, opencv::core::CV_32S, 1 },
+//     // { opencv::core::Mat2i, Vector2I, opencv::core::CV_32S, 2 },
+//     // { opencv::core::Mat3i, Vector3I, opencv::core::CV_32S, 3 },
+//     // { opencv::core::Mat4i, Vector4I, opencv::core::CV_32S, 4 },
+//     // { opencv::core::Mat1f, Vector1F, opencv::core::CV_32F, 1 },
+//     // { opencv::core::Mat2f, Vector2F, opencv::core::CV_32F, 2 },
+//     // { opencv::core::Mat3f, Vector3F, opencv::core::CV_32F, 3 },
+//     { opencv::core::Mat4f, Vector4F, opencv::core::CV_32F, 4 }
+// );
 register_value_type!(opencv::core::Rect2i, Rect2I);
 register_value_type!(opencv::core::Rect2f, Rect2F);
 register_value_type!(opencv::core::Size2i, Size2I);
@@ -318,6 +379,7 @@ impl_value_conversion!(bool, Boolean);
 impl_value_conversion!(i32, Int);
 impl_value_conversion!(f32, Float);
 impl_value_conversion!(Uuid, UUID);
+impl_value_conversion!(opencv::core::Mat, Mat);
 
 fn base_conversions() {
     // Self conversions
@@ -331,8 +393,8 @@ fn base_conversions() {
         |v: String | v.clone());
     register_conversion!(Uuid => Uuid,
         |v: Uuid | v);
-    register_conversion!(opencv::core::Mat => opencv::core::Mat,
-        |v: opencv::core::Mat | v.clone());
+    // register_conversion!(opencv::core::Mat => opencv::core::Mat,
+    //     |v: opencv::core::Mat | v.clone());
 
     // String conversions
     register_conversion!(String => Uuid,
