@@ -7,6 +7,7 @@ use std::sync::RwLock;
 use opencv::prelude::MatTraitConst;
 use opencv::prelude::MatSizeTraitConst;
 use crate::common::errors::BTrackError;
+use anyhow::anyhow;
 
 #[derive(Clone, Debug)]
 enum PortType {
@@ -131,7 +132,16 @@ static CONVERSIONS: Lazy<RwLock<HashMap<(TypeId, TypeId), ConversionFn>>> = Lazy
 
 pub trait ValueType: Send + Sync + 'static {
     fn type_id(&self) -> TypeId;
+    // Consumes the value
+    fn into_value(self) -> Value;
+    // Consumes on success
+    fn take_value(value: &Value) -> Option<Self> where Self: Sized;
+}
+
+pub trait ValueTypeClone: ValueType + Send + Sync + Clone + 'static {
+    // Clones the value
     fn to_value(&self) -> Value;
+    // Clones the value
     fn from_value(value: &Value) -> Option<Self> where Self: Sized;
 }
 
@@ -145,6 +155,10 @@ where
         .insert((from, to), Box::new(func));
 }
 
+pub fn can_convert(value: &Value, to: TypeId) -> Option<Value> {
+    CONVERSIONS.read().unwrap().get(&(value.inner_type_id(), to)).and_then(|f| f(value))
+}
+
 pub fn convert(value: &Value, to: TypeId) -> Option<Value> {
     CONVERSIONS.read().unwrap().get(&(value.inner_type_id(), to)).and_then(|f| f(value))
 }
@@ -155,22 +169,114 @@ pub enum Variant {
     Vector(Vec<Value>),
 }
 
+impl From<Variant> for Value {
+    fn from(value: Variant) -> Self {
+        Value::Variant(Box::new(value))
+    }
+}
+
+impl From<Value> for Variant {
+    fn from(value: Value) -> Self {
+        Variant::Single(value)
+    }
+}
+
+impl From<Vec<Value>> for Variant {
+    fn from(value: Vec<Value>) -> Self {
+        Variant::Vector(value)
+    }
+}
+
+impl<T:ValueType> From<Vec<T>> for Variant {
+    fn from(value: Vec<T>) -> Self {
+        Variant::Vector(value.into_iter().map(|v| v.into_value()).collect())
+    }
+}
+
+impl TryFrom<Variant> for Vec<Value> {
+    type Error = anyhow::Error;
+    fn try_from(value: Variant) -> Result<Self, Self::Error> {
+        if let Variant::Vector(v) = value {
+            Ok(v)
+        } else {
+            Err(anyhow!("Not a vector"))
+        }
+    }
+}
+
+impl<T:ValueType> TryFrom<Variant> for Vec<T> {
+    type Error = anyhow::Error;
+    fn try_from(value: Variant) -> Result<Self, Self::Error> {
+        if let Variant::Vector(v) = value {
+            if !v.iter().all(|i| i.inner_type_id() == TypeId::of::<T>()) { Err(anyhow!("Not all of same inner type")) }
+            else {
+                Ok(v.into_iter().map(|i| T::take_value(&i).unwrap()).collect())
+            }
+        } else {
+            Err(anyhow!("Not a vector"))
+        }
+    }
+}
+
+impl<T:ValueTypeClone> TryFrom<&Variant> for Vec<T> {
+    type Error = anyhow::Error;
+    fn try_from(value: &Variant) -> Result<Self, Self::Error> {
+        if let Variant::Vector(v) = value {
+            if !v.iter().all(|i| i.inner_type_id() == TypeId::of::<T>()) { Err(anyhow!("Not all of same inner type")) }
+            else {
+                Ok(v.iter().map(|i| T::from_value(&i).unwrap()).collect())
+            }
+        } else {
+            Err(anyhow!("Not a vector"))
+        }
+    }
+}
+
+// impl<T:std::convert::TryFrom<Value> + 'static> TryFrom<Variant> for Vec<T> {
+//     type Error = anyhow::Error;
+//     fn try_from(value: Variant) -> Result<Self, Self::Error> {
+//         if let Variant::Vector(v) = value {
+//             if !v.iter().all(|i| i.inner_type_id() == TypeId::of::<T>()) { Err(anyhow!("Not all of same inner type")) }
+//             else {
+//                 let res = v.into_iter().map(|i| i.try_into());
+//                 if res.all(|i| i.is_ok()) {
+//                     Ok(res.map(|i| i.ok().unwrap()).collect())
+//                 } else {
+//                     Err(anyhow!("Conversion errors"))
+//                 }
+//             }
+//         } else {
+//             Err(anyhow!("Not a vector"))
+//         }
+//     }
+// }
+
 #[macro_export]
 macro_rules! impl_value_conversion {
     ($t:ty, $variant:ident) => {
         impl TryFrom<&Value> for $t {
-            type Error = &'static str;
+            type Error = anyhow::Error;
             fn try_from(v: &Value) -> Result<Self, Self::Error> {
                 match <$t>::from_value(v) {
                     Some(r) => Ok(r),
-                    None => Err("Type mismatch"),
+                    None => Err(anyhow!("Type mismatch")),
+                }
+            }
+        }
+
+        impl TryFrom<Value> for $t {
+            type Error = anyhow::Error;
+            fn try_from(v: Value) -> Result<Self, Self::Error> {
+                match <$t>::take_value(&v) {
+                    Some(r) => Ok(r),
+                    None => Err(anyhow!("Type mismatch")),
                 }
             }
         }
 
         impl From<$t> for Value {
             fn from(v: $t) -> Self {
-                v.to_value()
+                v.into_value()
             }
         }
     };
@@ -178,12 +284,12 @@ macro_rules! impl_value_conversion {
     // For custom boxed types
     (custom $t:ty) => {
         impl TryFrom<&Value> for &$t {
-            type Error = &'static str;
+            type Error = anyhow::Error;
             fn try_from(v: &Value) -> Result<Self, Self::Error> {
                 if let Value::Custom(b) = v {
-                    b.downcast_ref::<$t>().ok_or("Type mismatch")
+                    b.downcast_ref::<$t>().ok_or(anyhow!("Type mismatch"))
                 } else {
-                    Err("Type mismatch")
+                    Err(anyhow!("Type mismatch"))
                 }
             }
         }
@@ -202,6 +308,17 @@ macro_rules! register_value_type {
     ($t:ty, $variant:ident) => {
         impl ValueType for $t {
             fn type_id(&self) -> TypeId { TypeId::of::<$t>() }
+            fn into_value(self) -> Value { Value::$variant(self) }
+            fn take_value(value: &Value) -> Option<Self> {
+                if let Value::$variant(v) = value {
+                    Some(v.to_owned())
+                } else {
+                    None
+                }
+            }
+        }
+
+        impl ValueTypeClone for $t {
             fn to_value(&self) -> Value { Value::$variant(self.clone()) }
             fn from_value(value: &Value) -> Option<Self> {
                 if let Value::$variant(v) = value {
@@ -261,6 +378,26 @@ macro_rules! register_mat {
     (to_val_mid $self:ident, {$t:ty, $variant:ident, $cv_t:expr, $($dims:literal),+}) => {
         register_mat!(to_val_impl $self, $t, $variant, $cv_t, $($dims), +);
     };
+    
+    // into_value implementation
+    (into_val $({$t:ty, $variant:ident, $cv_t:expr, $($dims:literal),+}),+) => {
+        fn into_value(self) -> Value {
+            register_mat!(into_val_mid self, $({$t, $variant, $cv_t, $($dims),+}),+);
+            Value::Mat(self)
+        }
+    };
+    (into_val_impl $self:ident, $t:ty, $variant:ident, $cv_t:expr, $($dims:literal),+) => {
+        if $self.typ() == $cv_t && register_mat!(dim $self, $($dims),+) {
+            return Value::$variant($self);
+        }
+    };
+    (into_val_mid $self:ident, {$t:ty, $variant:ident, $cv_t:expr, $($dims:literal),+}, $({$t2:ty, $variant2:ident, $cv_t2:expr, $($dims2:literal),+}),+) => {
+        register_mat!(into_val_impl $self, $t, $variant, $cv_t, $($dims), +);
+        register_mat!(into_val_mid $self, $({$t2, $variant2, $cv_t2, $($dims2), +}), +);
+    };
+    (into_val_mid $self:ident, {$t:ty, $variant:ident, $cv_t:expr, $($dims:literal),+}) => {
+        register_mat!(into_val_impl $self, $t, $variant, $cv_t, $($dims), +);
+    };
 
     // from_value implentation
     (from_val $({$t:ty, $variant:ident, $cv_t:expr, $($dims:literal),+}),+) => {
@@ -285,9 +422,37 @@ macro_rules! register_mat {
         register_mat!(from_val_impl $value, {$t, $variant, $cv_t, $($dims), +});
     };
 
+    // take_value implentation
+    (take_val $({$t:ty, $variant:ident, $cv_t:expr, $($dims:literal),+}),+) => {
+        fn take_value(value: &Value) -> Option<Self> {
+            register_mat!(take_val_mid value, $({$t, $variant, $cv_t, $($dims),+}),+);
+            if let Value::Mat(v) = value {
+                return Some(v.to_owned());
+            }
+            None
+        }
+    };
+    (take_val_impl $value:ident, {$t:ty, $variant:ident, $cv_t:expr, $($dims:literal),+}) => {
+        if let Value::$variant(v) = $value {
+            return Some(v.to_owned());
+        }
+    };
+    (take_val_mid $value:ident, {$t:ty, $variant:ident, $cv_t:expr, $($dims:literal),+}, $({$t2:ty, $variant2:ident, $cv_t2:expr, $($dims2:literal),+}),+) => {
+        register_mat!(take_val_impl $value, {$t, $variant, $cv_t, $($dims), +});
+        register_mat!(take_val_mid $value, $({$t2, $variant2, $cv_t2, $($dims2), +}), +);
+    };
+    (take_val_mid $value:ident, {$t:ty, $variant:ident, $cv_t:expr, $($dims:literal),+}) => {
+        register_mat!(take_val_impl $value, {$t, $variant, $cv_t, $($dims), +});
+    };
+
     ($({$t:ty, $variant:ident, $cv_t:expr, $($dims:literal),+}),+) => {
         impl ValueType for opencv::core::Mat {
             register_mat!(typ_id $({$t, $variant, $cv_t, $($dims), +}), +);
+            register_mat!(into_val $({$t, $variant, $cv_t, $($dims), +}), +);
+            register_mat!(take_val $({$t, $variant, $cv_t, $($dims), +}), +);
+        }
+
+        impl ValueTypeClone for opencv::core::Mat {
             register_mat!(to_val $({$t, $variant, $cv_t, $($dims), +}), +);
             register_mat!(from_val $({$t, $variant, $cv_t, $($dims), +}), +);
         }
@@ -316,7 +481,7 @@ macro_rules! register_conversion {
             TypeId::of::<$from>(),
             TypeId::of::<$to>(),
             |val| {
-                if let Some(v) = <$from as ValueType>::from_value(val) {
+                if let Some(v) = <$from as ValueType>::take_value(val) {
                     let out: $to = $func(v);
                     Some(out.to_value())
                 } else {
@@ -376,6 +541,7 @@ register_value_type!(opencv::core::Size2f, Size2F);
 // register_value_type!(opencv::core::Mat, Mat);
 
 impl_value_conversion!(bool, Boolean);
+impl_value_conversion!(u16, Word);
 impl_value_conversion!(i32, Int);
 impl_value_conversion!(f32, Float);
 impl_value_conversion!(Uuid, UUID);

@@ -14,15 +14,15 @@ fn simple_conversion() {
         |v: i32 | v);
     
     let var: Value = 15.into();
-    assert_eq!(var.as_int(), Some(15).as_ref());
-    assert_eq!(var.as_int(), Some(15).as_ref());
+    assert_eq!(var.as_int(), Some(&15));
+    assert_eq!(var.as_int(), Some(&15));
     let var: Option<Value> = convert(&var, TypeId::of::<i32>());
-    assert_eq!(var.unwrap().as_int(), Some(15).as_ref());
+    assert_eq!(var.unwrap().as_int(), Some(&15));
     
     let var: Value = Value::String("20".to_string());
-    assert_eq!(var.as_string(), Some("20".to_string()).as_ref());
+    assert_eq!(var.as_string(), Some(&"20".to_string()));
     let var: Option<Value> = convert(&var, TypeId::of::<i32>());
-    assert_eq!(var.unwrap().as_int(), Some(20).as_ref());
+    assert_eq!(var.unwrap().as_int(), Some(&20));
 }
 
 macro_rules! mat_into_tests {
@@ -65,8 +65,26 @@ mat_into_tests!(
 );
 
 #[test]
-fn mat_into() {
-    let value: Value = unsafe { cv::Mat::new_nd(&[3], CV_8U) }.unwrap().into();
-    assert_ne!(value.inner_type_id(), TypeId::of::<cv::Mat>());
-    assert_eq!(value.inner_type_id(), TypeId::of::<cv::Mat3b>());
+fn variant_value_conversions() {
+    let vars: Vec<Value> = vec![5.into(), 6.into()];
+    let batch: Variant = vars.into();
+
+    assert!(batch.is_vector());
+    let vars = batch.as_vector().unwrap();
+    assert_eq!(vars[0].as_int(), Some(&5));
+    assert_eq!(vars[1].as_int(), Some(&6));
+
+    let vars: Vec<Value> = batch.try_into().unwrap();
+    assert_eq!(vars[0].as_int(), Some(&5));
+    assert_eq!(vars[1].as_int(), Some(&6));
+
+    let batch: Variant = vars.into();
+    let vars: Vec<i32> = batch.try_into().unwrap();
+    assert_eq!(vars[0], 5);
+    assert_eq!(vars[1], 6);
+
+    let batch: Variant = vars.into();
+    let vars = batch.as_vector().unwrap();
+    assert_eq!(vars[0].as_int(), Some(&5));
+    assert_eq!(vars[1].as_int(), Some(&6));
 }
