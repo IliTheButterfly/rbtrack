@@ -194,6 +194,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a8d1add55171497b4705a648c6b583acafb01d58050a51727785f0b2c8e0a2b2"
 
 [[package]]
+name = "graphile_worker_extensions"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "404ab455d6eb07f55eb3bdbdb903c9b36ee7b19f9b58389ea1dea5d26cae00a7"
+
+[[package]]
 name = "hashbrown"
 version = "0.15.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -433,6 +439,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "egui",
+ "graphile_worker_extensions",
  "lazy_static",
  "once_cell",
  "opencv",

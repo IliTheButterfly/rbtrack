@@ -2,6 +2,7 @@ use once_cell::sync::Lazy;
 use uuid::Uuid;
 use variation::Variation;
 use std::any::{Any, TypeId};
+use graphile_worker_extensions::AnyClone;
 use std::collections::HashMap;
 use std::sync::RwLock;
 use opencv::prelude::MatTraitConst;
@@ -15,7 +16,7 @@ enum PortType {
     Output,
 }
 
-#[derive(Variation)]
+#[derive(Variation, Clone)]
 pub enum Value {
     // Base types
     Boolean(bool),
@@ -68,7 +69,7 @@ pub enum Value {
     Variant(Box<Variant>),
 
     // Custom
-    Custom(Box<dyn Any + Send + Sync>),
+    Custom(Box<dyn AnyClone + Send + Sync>),
 }
 
 impl Value {
@@ -130,17 +131,14 @@ static CONVERSIONS: Lazy<RwLock<HashMap<(TypeId, TypeId), ConversionFn>>> = Lazy
     RwLock::new(HashMap::new())
 });
 
-pub trait ValueType: Send + Sync + 'static {
+pub trait ValueType: Clone + Send + Sync + 'static {
     fn type_id(&self) -> TypeId;
     // Consumes the value
     fn into_value(self) -> Value;
-    // Consumes on success
-    fn take_value(value: &Value) -> Option<Self> where Self: Sized;
-}
-
-pub trait ValueTypeClone: ValueType + Send + Sync + Clone + 'static {
     // Clones the value
     fn to_value(&self) -> Value;
+    // Consumes on success
+    fn take_value(value: &Value) -> Option<Self> where Self: Sized;
     // Clones the value
     fn from_value(value: &Value) -> Option<Self> where Self: Sized;
 }
@@ -163,7 +161,7 @@ pub fn convert(value: &Value, to: TypeId) -> Option<Value> {
     CONVERSIONS.read().unwrap().get(&(value.inner_type_id(), to)).and_then(|f| f(value))
 }
 
-#[derive(Variation)]
+#[derive(Variation, Clone)]
 pub enum Variant {
     Single(Value),
     Vector(Vec<Value>),
@@ -218,7 +216,7 @@ impl<T:ValueType> TryFrom<Variant> for Vec<T> {
     }
 }
 
-impl<T:ValueTypeClone> TryFrom<&Variant> for Vec<T> {
+impl<T:ValueType> TryFrom<&Variant> for Vec<T> {
     type Error = anyhow::Error;
     fn try_from(value: &Variant) -> Result<Self, Self::Error> {
         if let Variant::Vector(v) = value {
@@ -294,6 +292,17 @@ macro_rules! impl_value_conversion {
             }
         }
 
+        impl TryFrom<Value> for $t {
+            type Error = anyhow::Error;
+            fn try_from(v: Value) -> Result<Self, Self::Error> {
+                if let Value::Custom(b) = v {
+                    b.downcast_ref::<$t>().ok_or(anyhow!("Type mismatch"))
+                } else {
+                    Err(anyhow!("Type mismatch"))
+                }
+            }
+        }
+
         impl From<$t> for Value {
             fn from(v: $t) -> Self {
                 Value::Custom(Box::new(v))
@@ -309,6 +318,7 @@ macro_rules! register_value_type {
         impl ValueType for $t {
             fn type_id(&self) -> TypeId { TypeId::of::<$t>() }
             fn into_value(self) -> Value { Value::$variant(self) }
+            fn to_value(&self) -> Value { Value::$variant(self.clone()) }
             fn take_value(value: &Value) -> Option<Self> {
                 if let Value::$variant(v) = value {
                     Some(v.to_owned())
@@ -316,10 +326,6 @@ macro_rules! register_value_type {
                     None
                 }
             }
-        }
-
-        impl ValueTypeClone for $t {
-            fn to_value(&self) -> Value { Value::$variant(self.clone()) }
             fn from_value(value: &Value) -> Option<Self> {
                 if let Value::$variant(v) = value {
                     Some(v.clone())
@@ -449,11 +455,8 @@ macro_rules! register_mat {
         impl ValueType for opencv::core::Mat {
             register_mat!(typ_id $({$t, $variant, $cv_t, $($dims), +}), +);
             register_mat!(into_val $({$t, $variant, $cv_t, $($dims), +}), +);
-            register_mat!(take_val $({$t, $variant, $cv_t, $($dims), +}), +);
-        }
-
-        impl ValueTypeClone for opencv::core::Mat {
             register_mat!(to_val $({$t, $variant, $cv_t, $($dims), +}), +);
+            register_mat!(take_val $({$t, $variant, $cv_t, $($dims), +}), +);
             register_mat!(from_val $({$t, $variant, $cv_t, $($dims), +}), +);
         }
     };
