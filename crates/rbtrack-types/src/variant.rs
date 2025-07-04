@@ -5,7 +5,6 @@ use std::any::{Any, TypeId};
 use graphile_worker_extensions::AnyClone;
 use std::collections::HashMap;
 use std::sync::RwLock;
-use crate::errors::BTrackError;
 use anyhow::anyhow;
 
 #[cfg(feature = "opencv-types")]
@@ -96,6 +95,7 @@ pub enum Value {
 }
 
 impl Value {
+    #[cfg(feature = "opencv-types")]
     pub const Transform4F: fn(opencv::core::Matx44f) -> Value = Value::Mat44F;
 
     pub fn inner_type_id(&self) -> TypeId {
@@ -193,7 +193,7 @@ pub trait ValueType: Clone + Send + Sync + 'static {
     fn from_value(value: &Value) -> Option<Self> where Self: Sized;
 }
 
-pub fn register_conversion<F>(from: TypeId, to: TypeId, func: F)
+pub fn register_conversion_fn<F>(from: TypeId, to: TypeId, func: F)
 where
     F: Fn(&Value) -> Option<Value> + Send + Sync + 'static,
 {
@@ -526,11 +526,11 @@ macro_rules! register_mat {
 #[macro_export]
 macro_rules! register_conversion {
     ($from:ty => $to:ty, $func:expr) => {{
-        $crate::variant::register_conversion(
+        $crate::variant::register_conversion_fn(
             TypeId::of::<$from>(),
             TypeId::of::<$to>(),
             |val| {
-                if let Some(v) = <$from as ValueType>::take_value(val) {
+                if let Some(v) = <$from as $crate::variant::ValueType>::take_value(val) {
                     let out: $to = $func(v);
                     Some(out.to_value())
                 } else {

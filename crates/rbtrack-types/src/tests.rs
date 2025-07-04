@@ -30,6 +30,7 @@ fn simple_conversion() {
 
 macro_rules! mat_into_tests {
     (imp {$t:ty, $variant:ident, $cv_t:expr, $($dims:literal),+}) => {
+        #[cfg(feature = "opencv-types")]
         paste! {
             #[test]
             fn [<mat_into_ $variant>] () {
