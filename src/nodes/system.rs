@@ -10,11 +10,7 @@ use opencv::prelude::MatSizeTraitConst;
 use crate::common::errors::BTrackError;
 use anyhow::anyhow;
 
-#[derive(Clone, Debug)]
-enum PortType {
-    Input,
-    Output,
-}
+
 
 #[derive(Variation, Clone)]
 pub enum Value {
@@ -151,10 +147,6 @@ where
         .write()
         .unwrap()
         .insert((from, to), Box::new(func));
-}
-
-pub fn can_convert(value: &Value, to: TypeId) -> Option<Value> {
-    CONVERSIONS.read().unwrap().get(&(value.inner_type_id(), to)).and_then(|f| f(value))
 }
 
 pub fn convert(value: &Value, to: TypeId) -> Option<Value> {
@@ -584,6 +576,12 @@ fn base_conversions() {
     register_conversion!(f32 => i32, |v: f32| unsafe { v.round().to_int_unchecked() });
 }
 
+#[derive(Clone, Debug)]
+enum PortType {
+    Input,
+    Output,
+}
+
 enum PortValueDimensions {
     // Assume there is only one value. Clone when dispatching to threads.
     Single,
@@ -592,7 +590,8 @@ enum PortValueDimensions {
     Array,
 }
 
-pub trait Item {
+
+pub trait Item: Send + Sync {
     fn label(&self) -> &str;
     fn label_mut(&mut self) -> &mut str;
     fn desc(&self) -> &str;
@@ -601,14 +600,134 @@ pub trait Item {
     fn id_mut(&mut self) -> &mut Uuid;
     fn parent_id(&self) -> &Option<Uuid>;
     fn parent_id_mut(&mut self) -> &mut Option<Uuid>;
-    fn clone_item(&self) -> Self;
 }
 
-pub trait Node: Send + Item {
+impl Item for Box<dyn Item + '_> {
+    fn label(&self) -> &str {
+        (**self).label()
+    }
+    fn label_mut(&mut self) -> &mut str {
+        (**self).label_mut()
+    }
+    fn desc(&self) -> &str {
+        (**self).desc()
+    }
+    fn desc_mut(&mut self) -> &mut str {
+        (**self).desc_mut()
+    }
+    fn id(&self) -> &Uuid {
+        (**self).id()
+    }
+    fn id_mut(&mut self) -> &mut Uuid {
+        (**self).id_mut()
+    }
+    fn parent_id(&self) -> &Option<Uuid> {
+        (**self).parent_id()
+    }
+    fn parent_id_mut(&mut self) -> &mut Option<Uuid> {
+        (**self).parent_id_mut()
+    }
+}
+
+pub trait Port: Send + Item {
+    fn get_value(&self) -> &Variant;
+    fn get_value_mut(&mut self) -> &mut Variant;
+}
+
+pub trait Input: Port {
+    fn connect_to(&mut self, other: &mut Box<dyn Output>);
+}
+
+pub trait Output: Port {
+    fn connect_to(&mut self, other: &mut Box<dyn Input>);
+}
+
+pub trait InnerInput: Output {
+    fn connect_to(&mut self, other: &mut Box<dyn OutterInput>);
+}
+
+pub trait InnerOutput: Input {
+    fn connect_to(&mut self, other: &mut Box<dyn OutterOutput>);
+}
+
+pub trait OutterInput: Input {
+    fn connect_to(&mut self, other: &mut Box<dyn InnerInput>);
+}
+
+pub trait OutterOutput: Output {
+    fn connect_to(&mut self, other: &mut Box<dyn InnerOutput>);
+}
+
+pub trait Node: Item {
     fn run(&mut self) -> Result<(), BTrackError>;
     fn compile(&mut self) -> Result<(), BTrackError>;
 }
 
-pub trait Port: Send + Item {
+macro_rules! define_node {
+    (
+        $name:ident {
+            $(
+                $port_field:ident : $port_ty:ty = $port_name:literal
+            ),* $(,)?
+        }
+    ) => {
+        pub struct $name {
+            $(
+                pub $port_field: Port,
+            )*
+            pub ports: Vec<*mut Port>,
+            pub name_map: HashMap<&'static str, usize>,
+            pub id_map: HashMap<Uuid, usize>,
+        }
+
+        impl $name {
+            pub fn new() -> Self {
+                let mut ports_vec = vec![];
+                let mut name_map = HashMap::new();
+                let mut id_map = HashMap::new();
+                $(
+                    let mut p = Port::new::<$port_ty>($port_name, $id);
+                    let ptr = &mut p as *mut _;
+                    ports_vec.push(ptr);
+                    name_map.insert($port_name, ports_vec.len() - 1);
+                    id_map.insert($id, ports_vec.len() - 1);
+                )*
+
+                Self {
+                    $(
+                        $port_field: Port::new::<$port_ty>($port_name, $id),
+                    )*
+                    ports: ports_vec,
+                    name_map,
+                    id_map,
+                }
+            }
+
+            pub fn port_by_name(&self, name: &str) -> Option<&Port> {
+                self.name_map.get(name).map(|&i| unsafe { &*self.ports[i] })
+            }
+
+            pub fn port_by_id(&self, id: Uuid) -> Option<&Port> {
+                self.id_map.get(&id).map(|&i| unsafe { &*self.ports[i] })
+            }
+
+            pub fn port_by_index(&self, index: usize) -> Option<&Port> {
+                self.ports.get(index).map(|&p| unsafe { &*p })
+            }
+
+            $(
+                pub fn $port_field(&self) -> &Port {
+                    &self.$port_field
+                }
+
+                pub fn $port_field##_mut(&mut self) -> &mut Port {
+                    &mut self.$port_field
+                }
+            )*
+        }
+    };
 }
+
+
+
 
