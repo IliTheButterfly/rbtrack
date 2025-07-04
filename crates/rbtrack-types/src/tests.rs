@@ -1,8 +1,11 @@
 use std::any::TypeId;
 use crate::{register_value_type, register_conversion, impl_value_conversion};
-use super::system::*;
-use opencv::core::{self as cv, CV_8U};
+use super::errors::*;
+use super::variant::*;
 use paste::paste;
+
+#[cfg(feature = "opencv-types")]
+use opencv::core::{self as cv, CV_8U};
 
 #[cfg(test)]
 #[test]

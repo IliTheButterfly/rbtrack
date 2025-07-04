@@ -1,0 +1,10 @@
+[package]
+name = "rbtrack-plugin-loader"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+uuid = { workspace = true }
+once_cell = { workspace = true }
+rbtrack-types = { path = "../rbtrack-types" }
+

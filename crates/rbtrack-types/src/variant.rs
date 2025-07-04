@@ -5,11 +5,11 @@ use std::any::{Any, TypeId};
 use graphile_worker_extensions::AnyClone;
 use std::collections::HashMap;
 use std::sync::RwLock;
-use opencv::prelude::MatTraitConst;
-use opencv::prelude::MatSizeTraitConst;
-use crate::common::errors::BTrackError;
+use crate::errors::BTrackError;
 use anyhow::anyhow;
 
+#[cfg(feature = "opencv-types")]
+use opencv::prelude::{MatTraitConst,MatSizeTraitConst};
 
 
 #[derive(Variation, Clone)]
@@ -23,42 +23,69 @@ pub enum Value {
     UUID(Uuid),
 
     // Points
+    #[cfg(feature = "opencv-types")]
     Point2I(opencv::core::Point2i),
+    #[cfg(feature = "opencv-types")]
     Point2F(opencv::core::Point2f),
+    #[cfg(feature = "opencv-types")]
     Point3I(opencv::core::Point3i),
+    #[cfg(feature = "opencv-types")]
     Point3F(opencv::core::Point3f),
 
     // Vectors
+    #[cfg(feature = "opencv-types")]
     Vector1B(opencv::core::Mat),
+    #[cfg(feature = "opencv-types")]
     Vector2B(opencv::core::Mat),
+    #[cfg(feature = "opencv-types")]
     Vector3B(opencv::core::Mat),
+    #[cfg(feature = "opencv-types")]
     Vector4B(opencv::core::Mat),
+    #[cfg(feature = "opencv-types")]
     Vector1W(opencv::core::Mat),
+    #[cfg(feature = "opencv-types")]
     Vector2W(opencv::core::Mat),
+    #[cfg(feature = "opencv-types")]
     Vector3W(opencv::core::Mat),
+    #[cfg(feature = "opencv-types")]
     Vector4W(opencv::core::Mat),
+    #[cfg(feature = "opencv-types")]
     Vector1I(opencv::core::Mat),
+    #[cfg(feature = "opencv-types")]
     Vector2I(opencv::core::Mat),
+    #[cfg(feature = "opencv-types")]
     Vector3I(opencv::core::Mat),
+    #[cfg(feature = "opencv-types")]
     Vector4I(opencv::core::Mat),
+    #[cfg(feature = "opencv-types")]
     Vector1F(opencv::core::Mat),
+    #[cfg(feature = "opencv-types")]
     Vector2F(opencv::core::Mat),
+    #[cfg(feature = "opencv-types")]
     Vector3F(opencv::core::Mat),
+    #[cfg(feature = "opencv-types")]
     Vector4F(opencv::core::Mat),
 
     // Matrices
+    #[cfg(feature = "opencv-types")]
     Mat44F(opencv::core::Matx44f),
+    #[cfg(feature = "opencv-types")]
     Mat33F(opencv::core::Matx33f),
 
     // Any other matrix
+    #[cfg(feature = "opencv-types")]
     Mat(opencv::core::Mat),
 
     // Rects
+    #[cfg(feature = "opencv-types")]
     Rect2I(opencv::core::Rect2i),
+    #[cfg(feature = "opencv-types")]
     Rect2F(opencv::core::Rect2f),
 
     // Sizes
+    #[cfg(feature = "opencv-types")]
     Size2I(opencv::core::Size2i),
+    #[cfg(feature = "opencv-types")]
     Size2F(opencv::core::Size2f),
 
     // Recursion
@@ -80,37 +107,64 @@ impl Value {
             Value::String(_) => TypeId::of::<String>(),
             Value::UUID(_) => TypeId::of::<Uuid>(),
     
+            #[cfg(feature = "opencv-types")]
             Value::Point2I(_) => TypeId::of::<opencv::core::Point2i>(),
+            #[cfg(feature = "opencv-types")]
             Value::Point2F(_) => TypeId::of::<opencv::core::Point2f>(),
+            #[cfg(feature = "opencv-types")]
             Value::Point3I(_) => TypeId::of::<opencv::core::Point3i>(),
+            #[cfg(feature = "opencv-types")]
             Value::Point3F(_) => TypeId::of::<opencv::core::Point3f>(),
     
+            #[cfg(feature = "opencv-types")]
             Value::Vector1B(_) => TypeId::of::<opencv::core::Mat1b>(),
+            #[cfg(feature = "opencv-types")]
             Value::Vector2B(_) => TypeId::of::<opencv::core::Mat2b>(),
+            #[cfg(feature = "opencv-types")]
             Value::Vector3B(_) => TypeId::of::<opencv::core::Mat3b>(),
+            #[cfg(feature = "opencv-types")]
             Value::Vector1W(_) => TypeId::of::<opencv::core::Mat1w>(),
+            #[cfg(feature = "opencv-types")]
             Value::Vector2W(_) => TypeId::of::<opencv::core::Mat2w>(),
+            #[cfg(feature = "opencv-types")]
             Value::Vector3W(_) => TypeId::of::<opencv::core::Mat3w>(),
+            #[cfg(feature = "opencv-types")]
             Value::Vector4W(_) => TypeId::of::<opencv::core::Mat4w>(),
+            #[cfg(feature = "opencv-types")]
             Value::Vector4B(_) => TypeId::of::<opencv::core::Mat4b>(),
+            #[cfg(feature = "opencv-types")]
             Value::Vector1I(_) => TypeId::of::<opencv::core::Mat1i>(),
+            #[cfg(feature = "opencv-types")]
             Value::Vector2I(_) => TypeId::of::<opencv::core::Mat2i>(),
+            #[cfg(feature = "opencv-types")]
             Value::Vector3I(_) => TypeId::of::<opencv::core::Mat3i>(),
+            #[cfg(feature = "opencv-types")]
             Value::Vector4I(_) => TypeId::of::<opencv::core::Mat4i>(),
+            #[cfg(feature = "opencv-types")]
             Value::Vector1F(_) => TypeId::of::<opencv::core::Mat1f>(),
+            #[cfg(feature = "opencv-types")]
             Value::Vector2F(_) => TypeId::of::<opencv::core::Mat2f>(),
+            #[cfg(feature = "opencv-types")]
             Value::Vector3F(_) => TypeId::of::<opencv::core::Mat3f>(),
+            #[cfg(feature = "opencv-types")]
             Value::Vector4F(_) => TypeId::of::<opencv::core::Mat4f>(),
     
+            #[cfg(feature = "opencv-types")]
             Value::Mat44F(_) => TypeId::of::<opencv::core::Matx44f>(),
+            #[cfg(feature = "opencv-types")]
             Value::Mat33F(_) => TypeId::of::<opencv::core::Matx33f>(),
     
+            #[cfg(feature = "opencv-types")]
             Value::Mat(_) => TypeId::of::<opencv::core::Mat>(),
     
+            #[cfg(feature = "opencv-types")]
             Value::Rect2I(_) => TypeId::of::<opencv::core::Rect2i>(),
+            #[cfg(feature = "opencv-types")]
             Value::Rect2F(_) => TypeId::of::<opencv::core::Rect2f>(),
     
+            #[cfg(feature = "opencv-types")]
             Value::Size2I(_) => TypeId::of::<opencv::core::Size2i>(),
+            #[cfg(feature = "opencv-types")]
             Value::Size2F(_) => TypeId::of::<opencv::core::Size2f>(),
     
             Value::Variant(b) => (*b).type_id(),
@@ -472,7 +526,7 @@ macro_rules! register_mat {
 #[macro_export]
 macro_rules! register_conversion {
     ($from:ty => $to:ty, $func:expr) => {{
-        $crate::nodes::system::register_conversion(
+        $crate::variant::register_conversion(
             TypeId::of::<$from>(),
             TypeId::of::<$to>(),
             |val| {
@@ -494,6 +548,7 @@ register_value_type!(f32, Float);
 register_value_type!(String, String);
 register_value_type!(Uuid, UUID);
 
+#[cfg(feature = "opencv-types")]
 register_mat!(
     { opencv::core::Mat1b, Vector1B, opencv::core::CV_8U, 1 },
     { opencv::core::Mat2b, Vector2B, opencv::core::CV_8U, 2 },
@@ -529,9 +584,13 @@ register_mat!(
 //     // { opencv::core::Mat3f, Vector3F, opencv::core::CV_32F, 3 },
 //     { opencv::core::Mat4f, Vector4F, opencv::core::CV_32F, 4 }
 // );
+#[cfg(feature = "opencv-types")]
 register_value_type!(opencv::core::Rect2i, Rect2I);
+#[cfg(feature = "opencv-types")]
 register_value_type!(opencv::core::Rect2f, Rect2F);
+#[cfg(feature = "opencv-types")]
 register_value_type!(opencv::core::Size2i, Size2I);
+#[cfg(feature = "opencv-types")]
 register_value_type!(opencv::core::Size2f, Size2F);
 // register_value_type!(opencv::core::Mat, Mat);
 
@@ -540,6 +599,7 @@ impl_value_conversion!(u16, Word);
 impl_value_conversion!(i32, Int);
 impl_value_conversion!(f32, Float);
 impl_value_conversion!(Uuid, UUID);
+#[cfg(feature = "opencv-types")]
 impl_value_conversion!(opencv::core::Mat, Mat);
 
 fn base_conversions() {
@@ -575,159 +635,3 @@ fn base_conversions() {
     register_conversion!(f32 => bool, |v: f32| v > 0.5);
     register_conversion!(f32 => i32, |v: f32| unsafe { v.round().to_int_unchecked() });
 }
-
-#[derive(Clone, Debug)]
-enum PortType {
-    Input,
-    Output,
-}
-
-enum PortValueDimensions {
-    // Assume there is only one value. Clone when dispatching to threads.
-    Single,
-    // Assume there are multiple values. 
-    // Dispatch into n threads, each thread getting their respective value.
-    Array,
-}
-
-
-pub trait Item: Send + Sync {
-    fn label(&self) -> &str;
-    fn label_mut(&mut self) -> &mut str;
-    fn desc(&self) -> &str;
-    fn desc_mut(&mut self) -> &mut str;
-    fn id(&self) -> &Uuid;
-    fn id_mut(&mut self) -> &mut Uuid;
-    fn parent_id(&self) -> &Option<Uuid>;
-    fn parent_id_mut(&mut self) -> &mut Option<Uuid>;
-}
-
-impl Item for Box<dyn Item + '_> {
-    fn label(&self) -> &str {
-        (**self).label()
-    }
-    fn label_mut(&mut self) -> &mut str {
-        (**self).label_mut()
-    }
-    fn desc(&self) -> &str {
-        (**self).desc()
-    }
-    fn desc_mut(&mut self) -> &mut str {
-        (**self).desc_mut()
-    }
-    fn id(&self) -> &Uuid {
-        (**self).id()
-    }
-    fn id_mut(&mut self) -> &mut Uuid {
-        (**self).id_mut()
-    }
-    fn parent_id(&self) -> &Option<Uuid> {
-        (**self).parent_id()
-    }
-    fn parent_id_mut(&mut self) -> &mut Option<Uuid> {
-        (**self).parent_id_mut()
-    }
-}
-
-pub trait Port: Send + Item {
-    fn get_value(&self) -> &Variant;
-    fn get_value_mut(&mut self) -> &mut Variant;
-}
-
-pub trait Input: Port {
-    fn connect_to(&mut self, other: &mut Box<dyn Output>);
-}
-
-pub trait Output: Port {
-    fn connect_to(&mut self, other: &mut Box<dyn Input>);
-}
-
-pub trait InnerInput: Output {
-    fn connect_to(&mut self, other: &mut Box<dyn OutterInput>);
-}
-
-pub trait InnerOutput: Input {
-    fn connect_to(&mut self, other: &mut Box<dyn OutterOutput>);
-}
-
-pub trait OutterInput: Input {
-    fn connect_to(&mut self, other: &mut Box<dyn InnerInput>);
-}
-
-pub trait OutterOutput: Output {
-    fn connect_to(&mut self, other: &mut Box<dyn InnerOutput>);
-}
-
-pub trait Node: Item {
-    fn run(&mut self) -> Result<(), BTrackError>;
-    fn compile(&mut self) -> Result<(), BTrackError>;
-}
-
-macro_rules! define_node {
-    (
-        $name:ident {
-            $(
-                $port_field:ident : $port_ty:ty = $port_name:literal
-            ),* $(,)?
-        }
-    ) => {
-        pub struct $name {
-            $(
-                pub $port_field: Port,
-            )*
-            pub ports: Vec<*mut Port>,
-            pub name_map: HashMap<&'static str, usize>,
-            pub id_map: HashMap<Uuid, usize>,
-        }
-
-        impl $name {
-            pub fn new() -> Self {
-                let mut ports_vec = vec![];
-                let mut name_map = HashMap::new();
-                let mut id_map = HashMap::new();
-                $(
-                    let mut p = Port::new::<$port_ty>($port_name, $id);
-                    let ptr = &mut p as *mut _;
-                    ports_vec.push(ptr);
-                    name_map.insert($port_name, ports_vec.len() - 1);
-                    id_map.insert($id, ports_vec.len() - 1);
-                )*
-
-                Self {
-                    $(
-                        $port_field: Port::new::<$port_ty>($port_name, $id),
-                    )*
-                    ports: ports_vec,
-                    name_map,
-                    id_map,
-                }
-            }
-
-            pub fn port_by_name(&self, name: &str) -> Option<&Port> {
-                self.name_map.get(name).map(|&i| unsafe { &*self.ports[i] })
-            }
-
-            pub fn port_by_id(&self, id: Uuid) -> Option<&Port> {
-                self.id_map.get(&id).map(|&i| unsafe { &*self.ports[i] })
-            }
-
-            pub fn port_by_index(&self, index: usize) -> Option<&Port> {
-                self.ports.get(index).map(|&p| unsafe { &*p })
-            }
-
-            $(
-                pub fn $port_field(&self) -> &Port {
-                    &self.$port_field
-                }
-
-                pub fn $port_field##_mut(&mut self) -> &mut Port {
-                    &mut self.$port_field
-                }
-            )*
-        }
-    };
-}
-
-
-
-

@@ -1,20 +1,24 @@
-[package]
-name = "rbtrack"
-version = "0.1.0"
-edition = "2024"
+[workspace]
+members = [
+    "crates/rbtrack-node-api",
+    "crates/rbtrack-nodes-std",
+    "crates/rbtrack-plugin-loader",
+    "crates/rbtrack-runtime",
+    "crates/rbtrack-types",
+    "crates/rbtrack-ui",
+    "crates/rbtrack-utils",
+    "plugins/*"
+]
 
-[dependencies]
+[workspace.dependencies]
+# Pin shared versions here to avoid duplication
+uuid = { version = "1.17.0", features = ["v4"]}
+once_cell = "1.21.3"
 egui ="0.31.1"
 serde = "1.0.219"
 petgraph = "0.8.1"
-uuid = { version = "1.16.0", features = ["v4"]}
 variation = "0.1.1"
-opencv = "0.94.4"
 lazy_static = "1.5.0"
-once_cell = "1.21.3"
 paste = "1.0.15"
 anyhow = "1.0.98"
 graphile_worker_extensions = "0.1.5"
-
-[lib]
-name = "rbtrack"

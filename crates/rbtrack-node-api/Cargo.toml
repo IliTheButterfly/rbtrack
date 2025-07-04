@@ -1,0 +1,16 @@
+[package]
+name = "rbtrack-node-api"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+uuid = { workspace = true }
+once_cell = { workspace = true }
+paste = { workspace = true }
+anyhow = { workspace = true }
+rbtrack-types = { path = "../rbtrack-types", features = ["opencv-types"] }
+
+[features]
+default = []
+opencv-types = ["rbtrack-types/opencv-types"]
+
