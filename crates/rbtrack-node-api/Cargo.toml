@@ -8,6 +8,7 @@ uuid = { workspace = true }
 once_cell = { workspace = true }
 paste = { workspace = true }
 anyhow = { workspace = true }
+parking_lot = { workspace = true }
 rbtrack-types = { path = "../rbtrack-types", features = ["opencv-types"] }
 
 [features]

@@ -4,7 +4,7 @@ use variation::Variation;
 use std::any::{Any, TypeId};
 use graphile_worker_extensions::AnyClone;
 use std::collections::HashMap;
-use std::sync::RwLock;
+use parking_lot::RwLock;
 use anyhow::anyhow;
 
 #[cfg(feature = "opencv-types")]
@@ -199,12 +199,13 @@ where
 {
     CONVERSIONS
         .write()
-        .unwrap()
         .insert((from, to), Box::new(func));
 }
 
 pub fn convert(value: &Value, to: TypeId) -> Option<Value> {
-    CONVERSIONS.read().unwrap().get(&(value.inner_type_id(), to)).and_then(|f| f(value))
+    CONVERSIONS.read()
+        .get(&(value.inner_type_id(), to))
+        .and_then(|f| f(value))
 }
 
 #[derive(Variation, Clone)]

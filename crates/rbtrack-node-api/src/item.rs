@@ -1,10 +1,10 @@
 use uuid::Uuid;
 
 pub trait Item: Send + Sync {
-    fn label(&self) -> &str;
-    fn label_mut(&mut self) -> &mut str;
-    fn desc(&self) -> &str;
-    fn desc_mut(&mut self) -> &mut str;
+    fn label(&self) -> &String;
+    fn label_mut(&mut self) -> &mut String;
+    fn desc(&self) -> &String;
+    fn desc_mut(&mut self) -> &mut String;
     fn id(&self) -> &Uuid;
     fn id_mut(&mut self) -> &mut Uuid;
     fn parent_id(&self) -> &Option<Uuid>;
@@ -12,16 +12,16 @@ pub trait Item: Send + Sync {
 }
 
 impl Item for Box<dyn Item + '_> {
-    fn label(&self) -> &str {
+    fn label(&self) -> &String {
         (**self).label()
     }
-    fn label_mut(&mut self) -> &mut str {
+    fn label_mut(&mut self) -> &mut String {
         (**self).label_mut()
     }
-    fn desc(&self) -> &str {
+    fn desc(&self) -> &String {
         (**self).desc()
     }
-    fn desc_mut(&mut self) -> &mut str {
+    fn desc_mut(&mut self) -> &mut String {
         (**self).desc_mut()
     }
     fn id(&self) -> &Uuid {

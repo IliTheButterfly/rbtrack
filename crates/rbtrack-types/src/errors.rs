@@ -1,7 +1,6 @@
 use std::error;
 use std::fmt;
-
-pub type Result<T> = std::result::Result<T, Box<dyn error::Error>>;
+use anyhow::Error;
 
 #[derive(Debug)]
 pub enum ConnectionError {
@@ -9,7 +8,7 @@ pub enum ConnectionError {
     IncompatibleTypes(/*from*/ String, /*to*/ String),
     AlreadyConnected,
     NotConnected,
-    Other(Box<dyn error::Error>),
+    Other(Error),
 }
 
 
@@ -17,7 +16,7 @@ pub enum ConnectionError {
 pub enum BTrackError{
     Unknown,
     ConnectionError(ConnectionError),
-    Other(Box<dyn error::Error>),
+    Other(Error),
 }
 
 impl fmt::Display for BTrackError {

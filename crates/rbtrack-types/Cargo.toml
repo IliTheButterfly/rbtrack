@@ -11,6 +11,7 @@ lazy_static = { workspace = true }
 paste = { workspace = true }
 variation = { workspace = true }
 graphile_worker_extensions = { workspace = true }
+parking_lot = { workspace = true }
 opencv = { version = "0.95.0", optional = true }
 
 [features]
