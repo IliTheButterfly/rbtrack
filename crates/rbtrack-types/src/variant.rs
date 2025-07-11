@@ -542,11 +542,36 @@ macro_rules! register_conversion {
     }};
 }
 
+impl ValueType for String {
+    fn type_id(&self) -> TypeId {
+        TypeId::of::<String>()
+    }
+    fn into_value(self) -> Value {
+        Value::String(self)
+    }
+    fn to_value(&self) -> Value {
+        Value::String(self.clone())
+    }
+    fn take_value(value: &Value) -> Option<Self>{
+        if let Value::String(v) = value {
+            Some(v.to_owned())
+        }else {
+            None
+        }
+    }
+    fn from_value(value: &Value) -> Option<Self>{
+        if let Value::String(v) = value {
+            Some(v.clone())
+        }else {
+            None
+        }
+    }
+}
+
 register_value_type!(bool, Boolean);
 register_value_type!(u16, Word);
 register_value_type!(i32, Int);
 register_value_type!(f32, Float);
-register_value_type!(String, String);
 register_value_type!(Uuid, UUID);
 
 #[cfg(feature = "opencv-types")]

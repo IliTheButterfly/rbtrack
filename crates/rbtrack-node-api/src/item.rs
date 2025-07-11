@@ -1,39 +1,19 @@
 use uuid::Uuid;
 
-pub trait Item: Send + Sync {
-    fn label(&self) -> &String;
-    fn label_mut(&mut self) -> &mut String;
-    fn desc(&self) -> &String;
-    fn desc_mut(&mut self) -> &mut String;
-    fn id(&self) -> &Uuid;
-    fn id_mut(&mut self) -> &mut Uuid;
-    fn parent_id(&self) -> &Option<Uuid>;
-    fn parent_id_mut(&mut self) -> &mut Option<Uuid>;
+pub type ItemIndex = usize;
+pub type ItemID = Uuid;
+pub type ItemLabel = String;
+pub type ItemDesc = String;
+
+#[derive(Clone)]
+pub struct ItemInfo {
+    pub id:ItemID,
+    pub label:ItemLabel,
+    pub desc:ItemDesc,
+    pub parent_id:Option<ItemID>,
 }
 
-impl Item for Box<dyn Item + '_> {
-    fn label(&self) -> &String {
-        (**self).label()
-    }
-    fn label_mut(&mut self) -> &mut String {
-        (**self).label_mut()
-    }
-    fn desc(&self) -> &String {
-        (**self).desc()
-    }
-    fn desc_mut(&mut self) -> &mut String {
-        (**self).desc_mut()
-    }
-    fn id(&self) -> &Uuid {
-        (**self).id()
-    }
-    fn id_mut(&mut self) -> &mut Uuid {
-        (**self).id_mut()
-    }
-    fn parent_id(&self) -> &Option<Uuid> {
-        (**self).parent_id()
-    }
-    fn parent_id_mut(&mut self) -> &mut Option<Uuid> {
-        (**self).parent_id_mut()
-    }
+pub trait Item {
+    fn info(&self) -> &ItemInfo;
+    fn info_mut(&mut self) -> &mut ItemInfo;
 }

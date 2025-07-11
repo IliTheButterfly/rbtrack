@@ -1,30 +1,36 @@
 use rbtrack_types::Variant;
-use super::Item;
+use super::{Item,ItemInfo,ItemDesc,ItemID,ItemIndex,ItemLabel};
 use rbtrack_types::errors::ConnectionError;
 use rbtrack_types::sync::{Arc,RwLock,Weak};
 
 pub trait Port: Send + Item {
     fn get_value(&self) -> Arc<RwLock<Variant>>;
+    fn read(&self) -> parking_lot::ArcRwLockReadGuard<parking_lot::RawRwLock, Variant> {
+        self.get_value().read_arc()
+    }
+    fn write(&self) -> parking_lot::ArcRwLockWriteGuard<parking_lot::RawRwLock, Variant> {
+        self.get_value().write_arc()
+    }
 }
 
+
 pub struct Input {
-    id:uuid::Uuid,
-    label:String,
-    desc:String,
+    info:ItemInfo,
     value:Arc<RwLock<Variant>>,
-    parent_id:Option<uuid::Uuid>,
     connection:Option<Weak<RwLock<Output>>>,
 }
 
 impl Input {
-    pub fn new(label:String, default_value:Variant, desc:Option<String>, parent_id:Option<uuid::Uuid>) -> Self {
+    pub fn new(label:ItemLabel, default_value:Variant, desc:Option<ItemDesc>, parent_id:Option<ItemID>) -> Self {
         Self{
-            id:uuid::Uuid::new_v4(),
-            label:label,
-            desc:desc.unwrap_or_default(),
+            info:ItemInfo {
+                id: ItemID::new_v4(),
+                label: label,
+                desc: desc.unwrap_or_default(),
+                parent_id: parent_id
+            },
             value:Arc::new(RwLock::new(default_value)),
-            parent_id:parent_id,
-            connection:None
+            connection:None,
         }
     }
     pub fn connect(&mut self, other: &Arc<RwLock<Output>>) -> Result<(), ConnectionError> {
@@ -58,47 +64,35 @@ impl Input {
         }
         Err(ConnectionError::NotConnected)
     }
+    pub fn connection(&self) -> Option<Weak<RwLock<Output>>> {
+        self.connection.clone()
+    }
+}
+
+impl Item for Input {
+    fn info(&self) -> &ItemInfo {
+        &self.info
+    }
+    fn info_mut(&mut self) -> &mut ItemInfo {
+        &mut self.info
+    }
 }
 
 impl Clone for Input {
     fn clone(&self) -> Self {
         Self{
-            id:uuid::Uuid::new_v4(),
-            label:self.label.clone(),
-            desc:self.desc.clone(),
+            info:ItemInfo{
+                id:ItemID::new_v4(),
+                label:self.info.label.clone(),
+                desc:self.info.desc.clone(),
+                parent_id:self.info.parent_id.clone(),
+            },
             value:Arc::new(RwLock::new(self.value.read().clone())),
-            parent_id:None,
             connection:None,
         }
     }
 }
 
-impl Item for Input {
-    fn desc(&self) -> &String {
-        &self.desc
-    }
-    fn desc_mut(&mut self) -> &mut String {
-        &mut self.desc
-    }
-    fn id(&self) -> &uuid::Uuid {
-        &self.id
-    }
-    fn id_mut(&mut self) -> &mut uuid::Uuid {
-        &mut self.id
-    }
-    fn label(&self) -> &String {
-        &self.label
-    }
-    fn label_mut(&mut self) -> &mut String {
-        &mut self.label
-    }
-    fn parent_id(&self) -> &Option<uuid::Uuid> {
-        &self.parent_id
-    }
-    fn parent_id_mut(&mut self) -> &mut Option<uuid::Uuid> {
-        &mut self.parent_id
-    }
-}
 
 impl Port for Input {
     fn get_value(&self) -> Arc<RwLock<Variant>> {
@@ -113,49 +107,44 @@ impl Port for Input {
 
 
 pub struct Output {
-    id:uuid::Uuid,
-    label:String,
-    desc:String,
+    info:ItemInfo,
     value:Arc<RwLock<Variant>>,
-    parent_id:Option<uuid::Uuid>,
 }
 
 impl Output {
     pub fn new(label:String, default_value:Variant, desc:Option<String>, parent_id:Option<uuid::Uuid>) -> Self {
         Self{
-            id:uuid::Uuid::new_v4(),
-            label:label,
-            desc:desc.unwrap_or_default(),
+            info:ItemInfo {
+                id: ItemID::new_v4(),
+                label: label,
+                desc: desc.unwrap_or_default(),
+                parent_id: parent_id
+            },
             value:Arc::new(RwLock::new(default_value)),
-            parent_id:parent_id,
         }
     }
 }
 
 impl Item for Output {
-    fn desc(&self) -> &String {
-        &self.desc
+    fn info(&self) -> &ItemInfo {
+        &self.info
     }
-    fn desc_mut(&mut self) -> &mut String {
-        &mut self.desc
+    fn info_mut(&mut self) -> &mut ItemInfo {
+        &mut self.info
     }
-    fn id(&self) -> &uuid::Uuid {
-        &self.id
-    }
-    fn id_mut(&mut self) -> &mut uuid::Uuid {
-        &mut self.id
-    }
-    fn label(&self) -> &String {
-        &self.label
-    }
-    fn label_mut(&mut self) -> &mut String {
-        &mut self.label
-    }
-    fn parent_id(&self) -> &Option<uuid::Uuid> {
-        &self.parent_id
-    }
-    fn parent_id_mut(&mut self) -> &mut Option<uuid::Uuid> {
-        &mut self.parent_id
+}
+
+impl Clone for Output {
+    fn clone(&self) -> Self {
+        Self{
+            info:ItemInfo{
+                id:ItemID::new_v4(),
+                label:self.info.label.clone(),
+                desc:self.info.desc.clone(),
+                parent_id:self.info.parent_id.clone(),
+            },
+            value:Arc::new(RwLock::new(self.value.read().clone())),
+        }
     }
 }
 
