@@ -7,4 +7,3 @@ pub use port::Port;
 pub use port as ports;
 pub mod group;
 pub mod register;
-mod tests;
