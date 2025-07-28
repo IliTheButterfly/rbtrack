@@ -628,7 +628,7 @@ impl_value_conversion!(Uuid, UUID);
 #[cfg(feature = "opencv-types")]
 impl_value_conversion!(opencv::core::Mat, Mat);
 
-fn base_conversions() {
+pub fn base_conversions() {
     // Self conversions
     register_conversion!(bool => bool,
         |v: bool | v);
