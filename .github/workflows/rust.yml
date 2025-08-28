@@ -16,11 +16,8 @@ jobs:
     steps:
     - name: Clone repo
       uses: actions/checkout@v4
-    - name: Set up Clang
-      uses: egor-tensin/setup-clang@v1
-      with:
-        version: latest # Or a specific version like '14'
-        platform: x64 # Or 'x86' for 32-bit builds
+    - name: Install dependencies
+      run: sudo apt-get update && sudo apt-get install -y clang libclang-dev
     - name: Build
       run: cargo build --verbose
     - name: Run tests
