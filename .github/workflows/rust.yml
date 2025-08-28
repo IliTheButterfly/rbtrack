@@ -12,11 +12,13 @@ jobs:
   ubuntu-build:
 
     runs-on: ubuntu-latest
+    container: 
+      image: ubuntu:22.04
 
     steps:
     - uses: actions/checkout@v4
     - name: Install packages
-      run: apt update && apt install -y clang
+      run: apt update && apt install -y clang rustup
     - name: Build
       run: cargo build --verbose
     - name: Run tests
