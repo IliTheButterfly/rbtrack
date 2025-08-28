@@ -18,7 +18,9 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Install packages
-      run: apt update && apt install -y clang rustc cargo
+      run: apt update && apt install -y clang curl
+    - name: Install rustup
+      run: curl https://sh.rustup.rs -sSf | sh -s -- -y
     - name: Update rustup
       run: rustup update
     - name: Build
