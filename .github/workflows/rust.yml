@@ -16,7 +16,7 @@ jobs:
     - name: Clone repo
       uses: actions/checkout@v4
     - name: Cache APT packages
-      uses: awalsh128/cache-apt-pkgs-action@v1.4
+      uses: awalsh128/cache-apt-pkgs-action@latest
       with:
         packages: |
           clang
