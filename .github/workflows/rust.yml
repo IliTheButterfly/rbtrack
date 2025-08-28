@@ -1,7 +1,6 @@
 name: Rust
 
 on:
-  push:
   pull_request:
     branches: [ "main" ]
 
@@ -16,8 +15,15 @@ jobs:
     steps:
     - name: Clone repo
       uses: actions/checkout@v4
-    - name: Install dependencies
-      run: sudo apt-get update && sudo apt-get install -y clang libclang-dev libopencv-dev pkg-config
+    - name: Cache APT packages
+      uses: awalsh128/cache-apt-pkgs-action@latest
+      with:
+        packages: |
+          clang
+          libclang-dev
+          libopencv-dev
+          pkg-config
+        version: v1.0 # Optional: Specify a version for cache invalidation
     - name: Build
       run: cargo build --verbose
     - name: Run tests
