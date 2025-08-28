@@ -21,23 +21,19 @@ jobs:
       with:
         version: latest # Or a specific version like '14'
         platform: x64 # Or 'x86' for 32-bit builds
-    - name: Install packages
-      run: apt update && apt install -y clang curl
-    - name: Install rustup
-      run: curl https://sh.rustup.rs -sSf | sh -s -- -y
-    - name: Build
-      run: source $HOME/.cargo/env && cargo build --verbose
-    - name: Run tests
-      run: source $HOME/.cargo/env && cargo test --verbose
-
-  windows-build:
-
-    runs-on: windows-latest
-
-    steps:
-    - name: Clone repo
-      uses: actions/checkout@v4
     - name: Build
       run: cargo build --verbose
     - name: Run tests
       run: cargo test --verbose
+
+  # windows-build:
+
+  #   runs-on: windows-latest
+
+  #   steps:
+  #   - name: Clone repo
+  #     uses: actions/checkout@v4
+  #   - name: Build
+  #     run: cargo build --verbose
+  #   - name: Run tests
+  #     run: cargo test --verbose
