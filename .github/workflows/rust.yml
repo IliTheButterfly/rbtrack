@@ -19,6 +19,8 @@ jobs:
     - uses: actions/checkout@v4
     - name: Install packages
       run: apt update && apt install -y clang rustc cargo
+    - name: Update rustup
+      run: rustup update
     - name: Build
       run: cargo build --verbose
     - name: Run tests
