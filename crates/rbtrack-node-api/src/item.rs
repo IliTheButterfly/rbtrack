@@ -17,3 +17,12 @@ pub trait Item {
     fn info(&self) -> &ItemInfo;
     fn info_mut(&mut self) -> &mut ItemInfo;
 }
+
+impl PartialEq for dyn Item {
+    fn eq(&self, other: &Self) -> bool {
+        self.info().id == other.info().id
+    }
+    fn ne(&self, other: &Self) -> bool {
+        self.info().id != other.info().id
+    }
+}

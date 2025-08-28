@@ -2,7 +2,7 @@
 use super::{Item,ItemDesc,ItemID,ItemIndex,ItemInfo,ItemLabel};
 use super::ports::{Input,Output};
 use rbtrack_types::sync::{Arc,RwLock};
-use rbtrack_types::errors::*;
+use rbtrack_types::{errors::*, Variant};
 use anyhow::{anyhow, Result};
 
 pub trait ProcessingNode: Send + Sync + Item {
@@ -12,6 +12,7 @@ pub trait ProcessingNode: Send + Sync + Item {
     fn outputs_mut(&mut self) -> &mut Vec<Arc<RwLock<Output>>>;
     fn compile(&mut self) -> Result<(), BTrackError>;
     fn run(&mut self) -> Result<(), BTrackError>;
+    fn is_forced(&self) -> bool { false }
 }
 
 pub trait Node: ProcessingNode {
@@ -21,49 +22,122 @@ pub trait Node: ProcessingNode {
             None => None,
         }
     }
+    fn input_id_from_index(&self, index:&ItemIndex) -> Option<ItemID> {
+        self.input_by_index(index).and_then(|input| Some(input.read_arc().info().id))
+    }
+    fn input_label_from_index(&self, index:&ItemIndex) -> Option<ItemLabel> {
+        self.input_by_index(index).and_then(|input| Some(input.read_arc().info().label.clone()))
+    }
+
     fn input_by_id(&self, id:&ItemID) -> Option<Arc<RwLock<Input>>> {
-        for input in self.inputs() {
-            if input.read().info().id == *id {
-                return Some(input.clone())
-            }
+        self.inputs().iter().cloned()
+            .filter(|input|&input.read_arc().info().id == id)
+            .next()
+    }
+    fn input_index_from_id(&self, id:&ItemID) -> Option<ItemIndex> {
+        self.inputs().iter().cloned()
+            .position(|input|&input.read_arc().info().id == id)
+    }
+    fn input_label_from_id(&self, id:&ItemID) -> Option<ItemLabel> {
+        if let Some(index) = self.input_index_from_id(id) {
+            return Some(self.inputs()[index].read_arc().info().label.clone())
         }
         None
     }
+
     fn input_by_label(&self, label:&ItemLabel) -> Option<Arc<RwLock<Input>>> {
-        for input in self.inputs() {
-            if input.read().info().label == *label {
-                return Some(input.clone())
-            }
+        self.inputs().iter().cloned()
+            .filter(|input|&input.read_arc().info().label == label)
+            .next()
+    }
+    fn input_index_from_label(&self, label:&ItemLabel) -> Option<ItemIndex> {
+        self.inputs().iter().cloned()
+            .position(|input|&input.read_arc().info().label == label)
+    }
+    fn input_label_from_label(&self, label:&ItemLabel) -> Option<ItemID> {
+        if let Some(index) = self.input_index_from_label(label) {
+            return Some(self.inputs()[index].read_arc().info().id.clone())
         }
         None
     }
+    
+
     fn output_by_index(&self, index:&ItemIndex) -> Option<Arc<RwLock<Output>>> {
         match self.outputs().get(*index) {
             Some(output) => Some(output.clone()),
             None => None,
         }
     }
+    fn output_id_from_index(&self, index:&ItemIndex) -> Option<ItemID> {
+        self.output_by_index(index).and_then(|output| Some(output.read_arc().info().id))
+    }
+    fn output_label_from_index(&self, index:&ItemIndex) -> Option<ItemLabel> {
+        self.output_by_index(index).and_then(|output| Some(output.read_arc().info().label.clone()))
+    }
+
     fn output_by_id(&self, id:&ItemID) -> Option<Arc<RwLock<Output>>> {
-        for output in self.outputs() {
-            if output.read().info().id == *id {
-                return Some(output.clone())
-            }
+        self.outputs().iter().cloned()
+            .filter(|output|&output.read_arc().info().id == id)
+            .next()
+    }
+    fn output_index_from_id(&self, id:&ItemID) -> Option<ItemIndex> {
+        self.outputs().iter().cloned()
+            .position(|output|&output.read_arc().info().id == id)
+    }
+    fn output_label_from_id(&self, id:&ItemID) -> Option<ItemLabel> {
+        if let Some(index) = self.output_index_from_id(id) {
+            return Some(self.outputs()[index].read_arc().info().label.clone())
         }
         None
     }
+
     fn output_by_label(&self, label:&ItemLabel) -> Option<Arc<RwLock<Output>>> {
-        for output in self.outputs() {
-            if output.read().info().label == *label {
-                return Some(output.clone())
-            }
+        self.outputs().iter().cloned()
+            .filter(|output|&output.read_arc().info().label == label)
+            .next()
+    }
+    fn output_index_from_label(&self, label:&ItemLabel) -> Option<ItemIndex> {
+        self.outputs().iter().cloned()
+            .position(|output|&output.read_arc().info().label == label)
+    }
+    fn output_label_from_label(&self, label:&ItemLabel) -> Option<ItemID> {
+        if let Some(index) = self.output_index_from_label(label) {
+            return Some(self.outputs()[index].read_arc().info().id.clone())
         }
         None
     }
 }
 
+pub trait DynamicNode : Node {
+    fn add_input(&mut self, label:String, default_value:Variant, desc:Option<String>) -> Arc<RwLock<Input>> {
+        let input = Arc::new(RwLock::new(Input::new(label, default_value, desc, Some(self.info.id))));
+        self.inputs_mut().push(input.clone());
+        input
+    }
+    fn remove_input(&mut self, input:Arc<RwLock<Input>>) -> Result<(), BTrackError> {
+        if let Some(index) = self.input_index_from_id(&input.read_arc().info().id) {
+            let _ = self.inputs_mut().remove(index);
+            return Ok(())
+        }
+        Err(BTrackError::Unknown)
+    }
+    fn add_output(&mut self, label:String, default_value:Variant, desc:Option<String>) -> Arc<RwLock<Output>> {
+        let output = Arc::new(RwLock::new(Output::new(label, default_value, desc, Some(self.info.id))));
+        self.outputs_mut().push(output.clone());
+        output
+    }
+    fn remove_output(&mut self, output:Arc<RwLock<Output>>) -> Result<(), BTrackError> {
+        if let Some(index) = self.output_index_from_id(&output.read_arc().info().id) {
+            let _ = self.outputs_mut().remove(index);
+            return Ok(())
+        }
+        Err(BTrackError::Unknown)
+    }
+}
+
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use crate::node::ProcessingNode;
     use crate::Port;
 

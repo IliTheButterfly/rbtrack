@@ -1,15 +1,24 @@
+use crate::node::DynamicNode;
+
 use super::{Item,ItemDesc,ItemID,ItemIndex,ItemInfo,ItemLabel,Node,Port,ProcessingNode,ports::{Input,Output}};
-use rbtrack_types::{Value,Variant};
+use rbtrack_types::{Value,Variant,errors::*};
 use rbtrack_types::sync::{Arc,RwLock,Weak};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::algo::toposort;
 use std::collections::HashMap;
+use anyhow::{anyhow, Result};
 
 pub trait GraphSolver: Sync + Send {
     fn solve(&self, nodes:&Vec<Arc<RwLock<dyn Node>>>) -> Vec<Arc<RwLock<dyn Node>>>;
 }
 
 pub struct TopologicalSolver {
+}
+
+impl TopologicalSolver {
+    pub fn new() -> Self {
+        Self {}
+    }
 }
 
 impl GraphSolver for TopologicalSolver {
@@ -65,7 +74,7 @@ impl GraphSolver for TopologicalSolver {
     }
 }
 
-pub trait Group: Node {
+pub trait Group: DynamicNode {
     fn nodes(&self) -> &Vec<Arc<RwLock<dyn Node>>>;
     fn nodes_mut(&mut self) -> &mut Vec<Arc<RwLock<dyn Node>>>;
 }
@@ -129,7 +138,33 @@ impl ProcessingNode for BaseGroup {
 }
 
 
+impl Node for BaseGroup {}
+
+impl DynamicNode for BaseGroup {}
+
+impl Group for BaseGroup {
+    fn nodes(&self) -> &Vec<Arc<RwLock<dyn Node>>> {
+        &self.nodes
+    }
+    fn nodes_mut(&mut self) -> &mut Vec<Arc<RwLock<dyn Node>>> {
+        &mut self.nodes
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::super::node::tests::IntSumNode;
+
+    use super::{BaseGroup, TopologicalSolver};
+
+    #[test]
+    fn test_topological_solver() {
+        let mut group = BaseGroup::new(
+            "test_group".to_string(),
+            "".to_string(),
+            Box::new(TopologicalSolver::new()),
+            None);
+        
+    }
     
 }
