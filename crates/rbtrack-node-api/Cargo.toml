@@ -11,6 +11,7 @@ anyhow = { workspace = true }
 parking_lot = { workspace = true, features = ["arc_lock"] }
 rbtrack-types = { path = "../rbtrack-types", features = ["opencv-types"] }
 petgraph = "0.8.2"
+indexmap = "2.11.0"
 
 [features]
 default = []

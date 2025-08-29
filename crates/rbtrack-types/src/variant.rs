@@ -10,8 +10,7 @@ use anyhow::anyhow;
 #[cfg(feature = "opencv-types")]
 use opencv::prelude::{MatTraitConst,MatSizeTraitConst};
 
-
-#[derive(Variation, Clone)]
+#[derive(Variation, Clone, Debug)]
 pub enum Value {
     // Base types
     Boolean(bool),
@@ -86,9 +85,6 @@ pub enum Value {
     Size2I(opencv::core::Size2i),
     #[cfg(feature = "opencv-types")]
     Size2F(opencv::core::Size2f),
-
-    // Recursion
-    Variant(Box<Variant>),
 
     // Custom
     Custom(Box<dyn AnyClone + Send + Sync>),
@@ -167,8 +163,6 @@ impl Value {
             #[cfg(feature = "opencv-types")]
             Value::Size2F(_) => TypeId::of::<opencv::core::Size2f>(),
     
-            Value::Variant(b) => (*b).type_id(),
-
             Value::Custom(b) => (*b).type_id(),
         }
     }
@@ -208,93 +202,31 @@ pub fn convert(value: &Value, to: TypeId) -> Option<Value> {
         .and_then(|f| f(value))
 }
 
-#[derive(Variation, Clone)]
-pub enum Variant {
-    Single(Value),
-    Vector(Vec<Value>),
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Shape {
+    /// scalar (single value)
+    Scalar,
+    /// vector of length N (None = variable-length)
+    Vector(Option<usize>),
 }
 
-impl From<Variant> for Value {
-    fn from(value: Variant) -> Self {
-        Value::Variant(Box::new(value))
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TypeSpec {
+    pub base: TypeId,
+    pub shape: Shape,
+}
+
+impl TypeSpec {
+    pub fn scalar(base: TypeId) -> Self {
+        Self { base, shape: Shape::Scalar }
+    }
+    pub fn var_vector(base: TypeId) -> Self {
+        Self { base, shape: Shape::Vector(None) }
+    }
+    pub fn fixed_vector(base: TypeId, len: usize) -> Self {
+        Self { base, shape: Shape::Vector(Some(len)) }
     }
 }
-
-impl From<Value> for Variant {
-    fn from(value: Value) -> Self {
-        Variant::Single(value)
-    }
-}
-
-impl From<Vec<Value>> for Variant {
-    fn from(value: Vec<Value>) -> Self {
-        Variant::Vector(value)
-    }
-}
-
-impl<T:ValueType> From<Vec<T>> for Variant {
-    fn from(value: Vec<T>) -> Self {
-        Variant::Vector(value.into_iter().map(|v| v.into_value()).collect())
-    }
-}
-
-impl TryFrom<Variant> for Vec<Value> {
-    type Error = anyhow::Error;
-    fn try_from(value: Variant) -> Result<Self, Self::Error> {
-        if let Variant::Vector(v) = value {
-            Ok(v)
-        } else {
-            Err(anyhow!("Not a vector"))
-        }
-    }
-}
-
-impl<T:ValueType> TryFrom<Variant> for Vec<T> {
-    type Error = anyhow::Error;
-    fn try_from(value: Variant) -> Result<Self, Self::Error> {
-        if let Variant::Vector(v) = value {
-            if !v.iter().all(|i| i.inner_type_id() == TypeId::of::<T>()) { Err(anyhow!("Not all of same inner type")) }
-            else {
-                Ok(v.into_iter().map(|i| T::take_value(&i).unwrap()).collect())
-            }
-        } else {
-            Err(anyhow!("Not a vector"))
-        }
-    }
-}
-
-impl<T:ValueType> TryFrom<&Variant> for Vec<T> {
-    type Error = anyhow::Error;
-    fn try_from(value: &Variant) -> Result<Self, Self::Error> {
-        if let Variant::Vector(v) = value {
-            if !v.iter().all(|i| i.inner_type_id() == TypeId::of::<T>()) { Err(anyhow!("Not all of same inner type")) }
-            else {
-                Ok(v.iter().map(|i| T::from_value(&i).unwrap()).collect())
-            }
-        } else {
-            Err(anyhow!("Not a vector"))
-        }
-    }
-}
-
-// impl<T:std::convert::TryFrom<Value> + 'static> TryFrom<Variant> for Vec<T> {
-//     type Error = anyhow::Error;
-//     fn try_from(value: Variant) -> Result<Self, Self::Error> {
-//         if let Variant::Vector(v) = value {
-//             if !v.iter().all(|i| i.inner_type_id() == TypeId::of::<T>()) { Err(anyhow!("Not all of same inner type")) }
-//             else {
-//                 let res = v.into_iter().map(|i| i.try_into());
-//                 if res.all(|i| i.is_ok()) {
-//                     Ok(res.map(|i| i.ok().unwrap()).collect())
-//                 } else {
-//                     Err(anyhow!("Conversion errors"))
-//                 }
-//             }
-//         } else {
-//             Err(anyhow!("Not a vector"))
-//         }
-//     }
-// }
 
 #[macro_export]
 macro_rules! impl_value_conversion {
@@ -509,21 +441,6 @@ macro_rules! register_mat {
     };
 }
 
-// impl ValueType for opencv::core::Mat {
-//     fn type_id(&self) -> TypeId { TypeId::of::<$t>() }
-//     fn to_value(&self) -> Value { 
-//         let mut ret = opencv::core::Mat::zeros(self.cols(), self.rows(), self.typ());
-//         Value::$variant(ret)
-//     }
-//     fn from_value(value: &Value) -> Option<Self> {
-//         if let Value::$variant(v) = value {
-//             Some(v.clone())
-//         } else {
-//             None
-//         }
-//     }
-// }
-
 #[macro_export]
 macro_rules! register_conversion {
     ($from:ty => $to:ty, $func:expr) => {{
@@ -596,20 +513,6 @@ register_mat!(
     // { mat opencv::core::Matx44f, Mat44F, opencv::core::CV_32F, 4, 4 }
 );
 
-// register_mat!(
-//     // { opencv::core::Mat1b, Vector1B, opencv::core::CV_8U, 1 },
-//     // { opencv::core::Mat2b, Vector2B, opencv::core::CV_8U, 2 },
-//     // { opencv::core::Mat3b, Vector3B, opencv::core::CV_8U, 3 },
-//     // { opencv::core::Mat4b, Vector4B, opencv::core::CV_8U, 4 },
-//     // { opencv::core::Mat1i, Vector1I, opencv::core::CV_32S, 1 },
-//     // { opencv::core::Mat2i, Vector2I, opencv::core::CV_32S, 2 },
-//     // { opencv::core::Mat3i, Vector3I, opencv::core::CV_32S, 3 },
-//     // { opencv::core::Mat4i, Vector4I, opencv::core::CV_32S, 4 },
-//     // { opencv::core::Mat1f, Vector1F, opencv::core::CV_32F, 1 },
-//     // { opencv::core::Mat2f, Vector2F, opencv::core::CV_32F, 2 },
-//     // { opencv::core::Mat3f, Vector3F, opencv::core::CV_32F, 3 },
-//     { opencv::core::Mat4f, Vector4F, opencv::core::CV_32F, 4 }
-// );
 #[cfg(feature = "opencv-types")]
 register_value_type!(opencv::core::Rect2i, Rect2I);
 #[cfg(feature = "opencv-types")]
@@ -618,7 +521,6 @@ register_value_type!(opencv::core::Rect2f, Rect2F);
 register_value_type!(opencv::core::Size2i, Size2I);
 #[cfg(feature = "opencv-types")]
 register_value_type!(opencv::core::Size2f, Size2F);
-// register_value_type!(opencv::core::Mat, Mat);
 
 impl_value_conversion!(bool, Boolean);
 impl_value_conversion!(u16, Word);
@@ -733,29 +635,5 @@ mod tests {
         { cv::Mat4f, Vector4F, cv::CV_32F, 4 }
     );
 
-    #[test]
-    fn variant_value_conversions() {
-        let vars: Vec<Value> = vec![5.into(), 6.into()];
-        let batch: Variant = vars.into();
-
-        assert!(batch.is_vector());
-        let vars = batch.as_vector().unwrap();
-        assert_eq!(vars[0].as_int(), Some(&5));
-        assert_eq!(vars[1].as_int(), Some(&6));
-
-        let vars: Vec<Value> = batch.try_into().unwrap();
-        assert_eq!(vars[0].as_int(), Some(&5));
-        assert_eq!(vars[1].as_int(), Some(&6));
-
-        let batch: Variant = vars.into();
-        let vars: Vec<i32> = batch.try_into().unwrap();
-        assert_eq!(vars[0], 5);
-        assert_eq!(vars[1], 6);
-
-        let batch: Variant = vars.into();
-        let vars = batch.as_vector().unwrap();
-        assert_eq!(vars[0].as_int(), Some(&5));
-        assert_eq!(vars[1].as_int(), Some(&6));
-    }
 
 }
