@@ -110,7 +110,7 @@ pub trait Node: ProcessingNode {
 
 pub trait DynamicNode : Node {
     fn add_input(&mut self, label:String, default_value:Variant, desc:Option<String>) -> Arc<RwLock<Input>> {
-        let input = Arc::new(RwLock::new(Input::new(label, default_value, desc, Some(self.info.id))));
+        let input = Arc::new(RwLock::new(Input::new(label, default_value, desc, Some(self.info().id))));
         self.inputs_mut().push(input.clone());
         input
     }
@@ -122,7 +122,7 @@ pub trait DynamicNode : Node {
         Err(BTrackError::Unknown)
     }
     fn add_output(&mut self, label:String, default_value:Variant, desc:Option<String>) -> Arc<RwLock<Output>> {
-        let output = Arc::new(RwLock::new(Output::new(label, default_value, desc, Some(self.info.id))));
+        let output = Arc::new(RwLock::new(Output::new(label, default_value, desc, Some(self.info().id))));
         self.outputs_mut().push(output.clone());
         output
     }
@@ -257,20 +257,19 @@ pub mod tests {
             Ok(())
         }
         fn run(&mut self) -> anyhow::Result<(), rbtrack_types::errors::BTrackError> {
-            *self.result_out.write_arc().write() = Variant::Single((
-                self.a_in.read_arc()
-                    .read()
-                    .as_single()
+            let a = self.a_in.read_arc()
+                    .read();
+            let a = a.as_single()
                     .ok_or(BTrackError::Other(anyhow!("Failed to unwrap")))?
                     .as_int()
-                    .ok_or(BTrackError::Other(anyhow!("Failed to unwrap")))? + 
-                self.b_in.read_arc()
-                    .read()
-                    .as_single()
+                    .ok_or(BTrackError::Other(anyhow!("Failed to unwrap")))?;
+            let b = self.b_in.read_arc()
+                    .read();
+            let b = b.as_single()
                     .ok_or(BTrackError::Other(anyhow!("Failed to unwrap")))?
                     .as_int()
-                    .ok_or(BTrackError::Other(anyhow!("Failed to unwrap")))?
-            ).into());
+                    .ok_or(BTrackError::Other(anyhow!("Failed to unwrap")))?; 
+            *self.result_out.write_arc().write() = Variant::Single((a + b).into());
             Ok(())
         }
         fn inputs(&self) -> &Vec<Arc<RwLock<Input>>> {

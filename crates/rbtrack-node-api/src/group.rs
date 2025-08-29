@@ -58,7 +58,7 @@ impl GraphSolver for TopologicalSolver {
         // Sort the node graph
         match toposort(&graph, None) {
             Ok(sorted) => {
-                for n in sorted.iter().rev() {
+                for n in sorted.iter() {
                     if let Some(id) = index_id_map.get(n) {
                         if let Some(node) = id_node_map.get(id) {
                             result.push(node.clone());
@@ -153,9 +153,14 @@ impl Group for BaseGroup {
 
 #[cfg(test)]
 mod tests {
+    use rbtrack_types::Variant;
+    use rbtrack_types::sync::{Arc,RwLock};
+
+    use crate::{Item, Port, ProcessingNode};
+
     use super::super::node::tests::IntSumNode;
 
-    use super::{BaseGroup, TopologicalSolver};
+    use super::{BaseGroup, Group, TopologicalSolver, Node, DynamicNode, Input, Output};
 
     #[test]
     fn test_topological_solver() {
@@ -165,6 +170,27 @@ mod tests {
             Box::new(TopologicalSolver::new()),
             None);
         
+        let node1 = Arc::new(RwLock::new(IntSumNode::new(group.info().parent_id)));
+        let node2 = Arc::new(RwLock::new(IntSumNode::new(group.info().parent_id)));
+        let node3 = Arc::new(RwLock::new(IntSumNode::new(group.info().parent_id)));
+        
+        group.nodes_mut().push(node1.clone());
+        group.nodes_mut().push(node2.clone());
+        group.nodes_mut().push(node3.clone());
+
+        assert!(node3.write_arc().input_by_label(&"a".into()).unwrap().write_arc().connect(&node1.read_arc().output_by_label(&"result".into()).unwrap()).is_ok());
+        assert!(node3.write_arc().input_by_label(&"b".into()).unwrap().write_arc().connect(&node2.read_arc().output_by_label(&"result".into()).unwrap()).is_ok());
+
+        *node1.read_arc().input_by_label(&"a".into()).unwrap().read_arc().write().as_single_mut().unwrap() = 5.into();
+        *node1.read_arc().input_by_label(&"b".into()).unwrap().read_arc().write().as_single_mut().unwrap() = 10.into();
+
+        *node2.read_arc().input_by_label(&"a".into()).unwrap().read_arc().write().as_single_mut().unwrap() = 7.into();
+        *node2.read_arc().input_by_label(&"b".into()).unwrap().read_arc().write().as_single_mut().unwrap() = 9.into();
+
+        assert!(group.compile().is_ok());
+        assert!(group.run().is_ok());
+
+        assert_eq!(node3.read_arc().output_by_label(&"result".into()).expect("Error1").read_arc().get_value().read().as_single().expect("Error2").as_int().expect("Error3"), &31);
     }
     
 }
