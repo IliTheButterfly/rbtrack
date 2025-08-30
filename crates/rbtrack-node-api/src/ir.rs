@@ -12,13 +12,13 @@ use uuid::Uuid;
 /// Basic metadata & IDs
 /// -------------------------
 #[derive(Clone, Debug)]
-pub struct ItemMeta {
+pub struct NodeMeta {
     pub id: Uuid,
     pub name: String,
     pub description: Option<String>,
 }
 
-impl ItemMeta {
+impl NodeMeta {
     pub fn new(name: impl Into<String>, description: impl Into<Option<String>>) -> Self {
         Self {
             id: Uuid::new_v4(),
@@ -100,7 +100,7 @@ pub enum NodeTemplateKind {
 
 #[derive(Clone, Debug)]
 pub struct NodeTemplate {
-    pub meta: ItemMeta,
+    pub meta: NodeMeta,
     pub ports: Vec<PortTemplate>,
     pub kind: NodeTemplateKind,
     // Optional: validation callback or capabilities descriptor (left runtime/plugin-bound)
@@ -109,7 +109,7 @@ pub struct NodeTemplate {
 impl NodeTemplate {
     pub fn new_atomic(name: &str, description: Option<&str>, ports: Vec<PortTemplate>) -> Self {
         Self {
-            meta: ItemMeta::new(name, description.map(|s| s.to_string())),
+            meta: NodeMeta::new(name, description.map(|s| s.to_string())),
             ports,
             kind: NodeTemplateKind::Atomic,
         }
@@ -118,17 +118,33 @@ impl NodeTemplate {
     pub fn new_group_like(name: &str, description: Option<&str>, group_id: Uuid) -> Self {
         let kind = NodeTemplateKind::Group(group_id);
         Self {
-            meta: ItemMeta::new(name, description.map(|s| s.to_string())),
+            meta: NodeMeta::new(name, description.map(|s| s.to_string())),
             ports: Vec::new(), // group-level ports stored on GroupTemplate
             kind,
         }
+    }
+
+    /// Find a port id by name. Optionally restrict to Input or Output via `dir`.
+    pub fn find_port_id_by_name(&self, name: &str, dir: Option<PortDirection>) -> Option<Uuid> {
+        for p in &self.ports {
+            if p.name == name {
+                if let Some(ref wanted_dir) = dir {
+                    if &p.direction == wanted_dir {
+                        return Some(p.id);
+                    }
+                } else {
+                    return Some(p.id);
+                }
+            }
+        }
+        None
     }
 }
 
 /// GroupTemplate: defines a body graph and external ports (the group's interface)
 #[derive(Clone, Debug)]
 pub struct GroupTemplate {
-    pub meta: ItemMeta,
+    pub meta: NodeMeta,
     pub external_ports: Vec<PortTemplate>, // group's inputs/outputs
     /// Instances: mapping instance-id -> NodeInstanceTemplate (nodes inside the group)
     /// Use IndexMap for deterministic iteration order (useful for deterministic compilation)
@@ -140,11 +156,29 @@ pub struct GroupTemplate {
 impl GroupTemplate {
     pub fn new(name: &str, description: Option<&str>, external_ports: Vec<PortTemplate>) -> Self {
         Self {
-            meta: ItemMeta::new(name, description.map(|s| s.to_string())),
+            meta: NodeMeta::new(name, description.map(|s| s.to_string())),
             external_ports,
             nodes: IndexMap::new(),
             connections: Vec::new(),
         }
+    }
+    pub fn resolve_port_ref<'a>(
+        &'a self,
+        node_id: Uuid,
+        port_name: &str,
+    ) -> Result<PortRef, String> {
+        let node = self.nodes.get(&node_id)
+            .ok_or_else(|| format!("Unknown node {node_id} in group"))?;
+
+        let port = node.ports.iter()
+            .find(|p| p.name == port_name)
+            .ok_or_else(|| format!("Unknown port {port_name} on node {node_id}"))?;
+
+        Ok(PortRef {
+            node_id,
+            port_name: port.name.clone(),
+            port_type: port.port_type,
+        })
     }
 
     pub fn add_node(&mut self, instance: NodeInstanceTemplate) {
@@ -218,6 +252,33 @@ impl Toolset {
         self.group_templates.insert(id, group);
         id
     }
+
+    /// NEW:
+    /// Find a port id (Uuid) inside a node template by port name.
+    pub fn lookup_port_id_in_node_template(
+        &self,
+        template_id: Uuid,
+        port_name: &str,
+    ) -> Option<Uuid> {
+        self.node_templates
+            .get(&template_id)
+            .and_then(|nt| nt.ports.iter().find(|p| p.name == port_name).map(|p| p.id))
+    }
+
+    /// NEW:
+    /// Find a port id (Uuid) inside a group template's external ports by port name.
+    pub fn lookup_port_id_in_group_template(
+        &self,
+        group_id: Uuid,
+        port_name: &str,
+    ) -> Option<Uuid> {
+        self.group_templates.get(&group_id).and_then(|g| {
+            g.external_ports
+                .iter()
+                .find(|p| p.name == port_name)
+                .map(|p| p.id)
+        })
+    }
 }
 
 /// Registrar: owns the toolset and entry point (root group)
@@ -239,9 +300,161 @@ impl Registrar {
         self.entry_group = Some(group_id);
     }
 
+    /// Resolve a (node instance id or group sentinel) + port name into a PortRef.
+    /// Returns a Diagnostic on failure to ease UI error reporting.
+    pub fn resolve_port_ref(
+        &self,
+        group: &GroupTemplate,
+        node_id: Uuid,
+        port_name: &str,
+    ) -> Result<PortRef, Diagnostic> {
+        // group external port
+        if node_id == GROUP_PORT_SENTINEL {
+            if let Some(p) = group.external_ports.iter().find(|p| p.name == port_name) {
+                return Ok(PortRef {
+                    node_id: GROUP_PORT_SENTINEL,
+                    port_id: p.id,
+                });
+            } else {
+                return Err(Diagnostic {
+                    severity: Severity::Error,
+                    message: format!(
+                        "Group '{}' has no external port named '{}'",
+                        group.meta.name, port_name
+                    ),
+                    related_ids: vec![group.meta.id],
+                });
+            }
+        }
+
+        // find the NodeInstanceTemplate
+        if let Some(inst) = group.nodes.get(&node_id) {
+            // lookup node template
+            if let Some(nt) = self.toolset.node_templates.get(&inst.template_id) {
+                // find port on template
+                if let Some(pid) = nt.find_port_id_by_name(port_name, None) {
+                    return Ok(PortRef {
+                        node_id,
+                        port_id: pid,
+                    });
+                } else {
+                    return Err(Diagnostic {
+                        severity: Severity::Error,
+                        message: format!(
+                            "Node instance '{}' (template '{}') has no port named '{}'",
+                            inst.instance_id, nt.meta.name, port_name
+                        ),
+                        related_ids: vec![inst.instance_id, nt.meta.id],
+                    });
+                }
+            } else {
+                return Err(Diagnostic {
+                    severity: Severity::Error,
+                    message: format!(
+                        "Node template '{}' (for instance {}) not found in toolset",
+                        inst.template_id, inst.instance_id
+                    ),
+                    related_ids: vec![inst.instance_id, inst.template_id],
+                });
+            }
+        } else {
+            return Err(Diagnostic {
+                severity: Severity::Error,
+                message: format!("Node instance {} not found in group {}", node_id, group.meta.name),
+                related_ids: vec![node_id, group.meta.id],
+            });
+        }
+    }
+
+    /// Convenience to add a connection by node/port names.
+    /// `from_node` and `to_node` may be GROUP_PORT_SENTINEL to refer to group external ports.
+    /// Returns Ok(connection_id) or Err(diagnostic) (the function will not mutate if it fails).
+    pub fn add_connection_by_names(
+        &mut self,
+        group_id: Uuid,
+        from_node: Uuid,
+        from_port_name: &str,
+        to_node: Uuid,
+        to_port_name: &str,
+    ) -> Result<Uuid, Diagnostic> {
+        // get group mutably
+        let group = match self.toolset.group_templates.get_mut(&group_id) {
+            Some(g) => g,
+            None => {
+                return Err(Diagnostic {
+                    severity: Severity::Error,
+                    message: format!("Group template {} not found", group_id),
+                    related_ids: vec![group_id],
+                })
+            }
+        };
+
+        // resolve both ends using non-mutable path (we only need &GroupTemplate)
+        let from_ref = match self.resolve_port_ref(&*group, from_node, from_port_name) {
+            Ok(r) => r,
+            Err(d) => return Err(d),
+        };
+        let to_ref = match self.resolve_port_ref(&*group, to_node, to_port_name) {
+            Ok(r) => r,
+            Err(d) => return Err(d),
+        };
+
+        // Basic direction sanity check: ensure resolved templates have matching directions
+        // Find PortTemplate for both to check direction
+        let get_port_template = |node_id: Uuid, port_id: Uuid|
+         -> Option<PortTemplate> {
+            if node_id == GROUP_PORT_SENTINEL {
+                group.external_ports.iter().find(|p| p.id == port_id).cloned()
+            } else {
+                group
+                    .nodes
+                    .get(&node_id)
+                    .and_then(|inst| self.toolset.node_templates.get(&inst.template_id))
+                    .and_then(|nt| nt.ports.iter().find(|p| p.id == port_id).cloned())
+            }
+        };
+
+        let from_pt = get_port_template(from_ref.node_id, from_ref.port_id);
+        let to_pt = get_port_template(to_ref.node_id, to_ref.port_id);
+
+        match (&from_pt, &to_pt) {
+            (Some(f), Some(t)) => {
+                if f.direction != PortDirection::Output {
+                    return Err(Diagnostic {
+                        severity: Severity::Error,
+                        message: format!("Resolved 'from' port '{}' is not an output", f.name),
+                        related_ids: vec![f.id],
+                    });
+                }
+                if t.direction != PortDirection::Input {
+                    return Err(Diagnostic {
+                        severity: Severity::Error,
+                        message: format!("Resolved 'to' port '{}' is not an input", t.name),
+                        related_ids: vec![t.id],
+                    });
+                }
+            }
+            _ => {
+                // one of the ports disappeared between resolve and now (unlikely), but handle gracefully
+                return Err(Diagnostic {
+                    severity: Severity::Error,
+                    message: "Failed to fetch port templates after resolution".to_string(),
+                    related_ids: vec![group.meta.id],
+                });
+            }
+        }
+
+        // All good — create connection and push to group's connections
+        let conn = ConnectionTemplate::new(from_ref, to_ref);
+        let conn_id = conn.id;
+        group.add_connection(conn);
+        Ok(conn_id)
+    }
+
     /// Validate the whole graph starting at entry point.
     /// Collect diagnostics per-group and return map group_id -> diagnostics
     pub fn validate(&self) -> HashMap<Uuid, Vec<Diagnostic>> {
+        // (existing validate impl unchanged)
         let mut diagnostics_map: HashMap<Uuid, Vec<Diagnostic>> = HashMap::new();
 
         if let Some(entry_id) = self.entry_group {
@@ -546,8 +759,10 @@ mod tests {
     use rbtrack_types::TypeSpec;
     use uuid::Uuid;
 
-    use crate::ir::{ConnectionTemplate, GroupTemplate, NodeInstanceTemplate, NodeTemplate, PortRef, PortTemplate, Registrar, GROUP_PORT_SENTINEL};
-
+    use crate::ir::{
+        ConnectionTemplate, GROUP_PORT_SENTINEL, GroupTemplate, NodeInstanceTemplate, NodeTemplate,
+        PortRef, PortTemplate, Registrar,
+    };
 
     #[test]
     fn example_usage() {
@@ -594,9 +809,8 @@ mod tests {
             registrar.toolset.register_node_template(t)
         };
 
-        // TripleIntSumGroup template
+        // After registering atomic node templates (int_value_node, int_sum_node, etc.)
         let triple_group_id = {
-            // group external ports: a,b,c -> res
             let mut group = GroupTemplate::new(
                 "TripleSumGroup",
                 Some("adds three ints using two sums"),
@@ -608,40 +822,76 @@ mod tests {
                 ],
             );
 
-            // create inner instances: sum1, sum2
             let sum1_inst = NodeInstanceTemplate {
                 instance_id: Uuid::new_v4(),
                 template_id: int_sum_node,
-                name_hint: Some("sum1".to_string()),
+                name_hint: Some("sum1".into()),
             };
             let sum2_inst = NodeInstanceTemplate {
                 instance_id: Uuid::new_v4(),
                 template_id: int_sum_node,
-                name_hint: Some("sum2".to_string()),
+                name_hint: Some("sum2".into()),
             };
 
             group.add_node(sum1_inst.clone());
             group.add_node(sum2_inst.clone());
 
-            // connections inside triple group
+            // Now use registrar helpers to add connections by names:
             // group.a -> sum1.a
-            // group.add_connection(ConnectionTemplate::new(
-            //     PortRef {
-            //         node_id: GROUP_PORT_SENTINEL,
-            //         port_id: group.external_ports[0].id,
-            //     },
-            //     PortRef {
-            //         node_id: sum1_inst.instance_id,
-            //         port_id: &group.nodes[&sum1_inst.instance_id]
-            //             .unwrap_or(sum1_inst)
-            //             .template_id, /* placeholder */
-            //     },
-            // ));
-            // The above is just illustrative — we need to resolve the port ids of the target node template.
-            // For brevity in this example, we'll create connections later after resolving exact port ids.
-            // In a real builder you'd look up the template's port IDs and use them here.
+            registrar
+                .add_connection_by_names(
+                    &mut group,
+                    GROUP_PORT_SENTINEL,
+                    "a",
+                    sum1_inst.instance_id,
+                    "a",
+                )
+                .expect("failed to add connection");
 
-            // Register group
+            // group.b -> sum1.b
+            registrar
+                .add_connection_by_names(
+                    &mut group,
+                    GROUP_PORT_SENTINEL,
+                    "b",
+                    sum1_inst.instance_id,
+                    "b",
+                )
+                .expect("failed to add connection");
+
+            // sum1.res -> sum2.a
+            registrar
+                .add_connection_by_names(
+                    &mut group,
+                    sum1_inst.instance_id,
+                    "res",
+                    sum2_inst.instance_id,
+                    "a",
+                )
+                .expect("failed to add connection");
+
+            // group.c -> sum2.b
+            registrar
+                .add_connection_by_names(
+                    &mut group,
+                    GROUP_PORT_SENTINEL,
+                    "c",
+                    sum2_inst.instance_id,
+                    "b",
+                )
+                .expect("failed to add connection");
+
+            // sum2.res -> group.res
+            registrar
+                .add_connection_by_names(
+                    &mut group,
+                    sum2_inst.instance_id,
+                    "res",
+                    GROUP_PORT_SENTINEL,
+                    "res",
+                )
+                .expect("failed to add connection");
+
             registrar.toolset.register_group_template(group)
         };
 
