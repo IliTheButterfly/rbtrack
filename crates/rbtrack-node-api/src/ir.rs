@@ -1,55 +1,104 @@
 // indexmap = "1.10"   // preserves insertion order (useful for deterministic behavior)
 
 use indexmap::IndexMap;
+use itertools::Itertools;
 use rbtrack_types::{Shape, TypeSpec, Value};
+use rbtrack_types::sync::{Arc, RwLock, Weak};
+use std::fmt::{Debug, Display};
+use std::path::Display;
 use std::{
     any::TypeId,
     collections::{HashMap, HashSet, VecDeque},
 };
 use uuid::Uuid;
 
+
 /// -------------------------
-/// Basic metadata & IDs
+/// IDs
 /// -------------------------
-#[derive(Clone, Debug)]
-pub struct NodeMeta {
-    pub id: Uuid,
-    pub name: String,
-    pub description: Option<String>,
+/// These help differentiating between templates/instances and item/ports IDs
+/// This is very useful because those IDs are incompatible
+
+
+// ID of a template stored in the registrar
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Debug)]
+pub struct TemplateID(Uuid);
+
+// ID of an instance inside a group
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Debug)]
+pub struct InstanceID(Uuid);
+
+// ID of a template port within an item template
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Debug)]
+pub struct TemplatePortID(Uuid);
+
+// ID of a instance port within an item instance
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Debug)]
+pub struct InstancePortID(Uuid);
+
+// Helper enum for diagnostics
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Debug)]
+pub enum ItemID {
+    Template(TemplateID),
+    Instance(InstanceID),
+    TemplatePort(TemplatePortID),
+    InstancePort(InstancePortID),
 }
 
-impl NodeMeta {
-    pub fn new(name: impl Into<String>, description: impl Into<Option<String>>) -> Self {
-        Self {
-            id: Uuid::new_v4(),
-            name: name.into(),
-            description: description.into(),
+impl Display for ItemID {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self {
+            Self::Template(id) => write!(f, "Template: {:?}", id.0.to_string().get(..6)),
+            Self::Instance(id) => write!(f, "Instance: {:?}", id.0.to_string().get(..6)),
+            Self::TemplatePort(id) => write!(f, "TemplatePort: {:?}", id.0.to_string().get(..6)),
+            Self::InstancePort(id) => write!(f, "InstancePort: {:?}", id.0.to_string().get(..6)),
         }
     }
 }
 
+
 /// -------------------------
 /// Diagnostics
 /// -------------------------
-#[derive(Clone, Debug)]
+
+// Severity of the diagnostic
+#[derive(Clone, Debug, Copy, Eq, PartialEq)]
 pub enum Severity {
     Error,
     Warning,
     Info,
 }
 
-#[derive(Clone, Debug)]
+impl Display for Severity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+// A diagnostic struct for compilation debugging
+#[derive(Clone)]
 pub struct Diagnostic {
     pub severity: Severity,
     pub message: String,
     /// Optionally point to a template/node/port (by id) for precise UI mapping
-    pub related_ids: Vec<Uuid>,
+    pub related_ids: Vec<ItemID>,
+}
+
+impl Debug for Diagnostic {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let ids: String = itertools::Itertools::intersperse(self.related_ids.iter().map(|id| id.to_string()), ", ".to_string()).collect();
+        write!(f, "[{}] {} | IDs: {}", 
+            self.severity.to_string(), 
+            self.message, 
+            ids
+            )
+    }
 }
 
 /// -------------------------
-/// Ports
+/// Templates
 /// -------------------------
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Copy)]
 pub enum PortDirection {
     Input,
     Output,
@@ -57,7 +106,10 @@ pub enum PortDirection {
 
 #[derive(Clone, Debug)]
 pub struct PortTemplate {
-    pub id: Uuid,
+    // ItemTemplate ID
+    pub parent_id: TemplateID,
+    // ID of this port template
+    pub id: TemplatePortID,
     pub name: String,
     pub direction: PortDirection,
     pub ty: TypeSpec,
@@ -66,18 +118,20 @@ pub struct PortTemplate {
 }
 
 impl PortTemplate {
-    pub fn new_input(name: &str, ty: TypeSpec, default: Option<Value>) -> Self {
+    pub fn new_input(parent_id: TemplateID, name: &str, ty: TypeSpec, default: Option<Value>) -> Self {
         Self {
-            id: Uuid::new_v4(),
+            parent_id: parent_id,
+            id: TemplatePortID(Uuid::new_v4()),
             name: name.to_string(),
             direction: PortDirection::Input,
             ty,
             default,
         }
     }
-    pub fn new_output(name: &str, ty: TypeSpec) -> Self {
+    pub fn new_output(parent_id: TemplateID, name: &str, ty: TypeSpec) -> Self {
         Self {
-            id: Uuid::new_v4(),
+            parent_id: parent_id,
+            id: TemplatePortID(Uuid::new_v4()),
             name: name.to_string(),
             direction: PortDirection::Output,
             ty,
@@ -86,123 +140,103 @@ impl PortTemplate {
     }
 }
 
-/// -------------------------
-/// Node templates & groups
-/// -------------------------
-#[derive(Clone, Debug)]
-/// NodeTemplateKind:
-pub enum NodeTemplateKind {
-    /// - Atomic: a leaf node implemented by user/runtime
-    Atomic,
-    /// - Group: a node that refers to a group template (by id)
-    Group(Uuid), // group template id
-}
-
-#[derive(Clone, Debug)]
-pub struct NodeTemplate {
-    pub meta: NodeMeta,
+#[derive(Debug, Clone)]
+pub struct ItemTemplate {
+    // ID of this item template
+    pub id: TemplateID,
+    pub name: String,
     pub ports: Vec<PortTemplate>,
-    pub kind: NodeTemplateKind,
-    // Optional: validation callback or capabilities descriptor (left runtime/plugin-bound)
+    // When used as a group, nodes that are contained by this group
+    pub nodes: Option<Vec<ItemInstance>>,
+    // When used as a group, connections within this group
+    pub connections: Option<Vec<Connection>>,
 }
 
-impl NodeTemplate {
-    pub fn new_atomic(name: &str, description: Option<&str>, ports: Vec<PortTemplate>) -> Self {
+impl ItemTemplate {
+    pub fn new_atomic(name: &str) -> Self {
         Self {
-            meta: NodeMeta::new(name, description.map(|s| s.to_string())),
-            ports,
-            kind: NodeTemplateKind::Atomic,
+            id: TemplateID(Uuid::new_v4()),
+            name: name.to_string(),
+            ports: vec![],
+            nodes: None,
+            connections: None,
         }
     }
 
-    pub fn new_group_like(name: &str, description: Option<&str>, group_id: Uuid) -> Self {
-        let kind = NodeTemplateKind::Group(group_id);
+    pub fn new_group(name: &str) -> Self {
         Self {
-            meta: NodeMeta::new(name, description.map(|s| s.to_string())),
-            ports: Vec::new(), // group-level ports stored on GroupTemplate
-            kind,
+            id: TemplateID(Uuid::new_v4()),
+            name: name.to_string(),
+            ports: vec![],
+            nodes: Some(vec![]),
+            connections: Some(vec![]),
         }
     }
 
-    /// Find a port id by name. Optionally restrict to Input or Output via `dir`.
-    pub fn find_port_id_by_name(&self, name: &str, dir: Option<PortDirection>) -> Option<Uuid> {
-        for p in &self.ports {
-            if p.name == name {
-                if let Some(ref wanted_dir) = dir {
-                    if &p.direction == wanted_dir {
-                        return Some(p.id);
-                    }
-                } else {
-                    return Some(p.id);
-                }
-            }
-        }
-        None
+    pub fn add_input(&mut self, name: &str, ty: TypeSpec, default: Option<Value>) -> TemplatePortID {
+        let port = PortTemplate::new_input(self.id, name, ty, default);
+        let id = port.id;
+        self.ports.push(port);
+        id
+    }
+
+    pub fn add_output(&mut self, name: &str, ty: TypeSpec) -> TemplatePortID {
+        let port = PortTemplate::new_output(self.id, name, ty);
+        let id = port.id;
+        self.ports.push(port);
+        id
+    }
+
+    pub fn port_from_id(&self, id: TemplatePortID) -> Option<&PortTemplate> {
+        self.ports.iter().find(|&p| p.id == id)
+    }
+
+    pub fn port_from_name(&self, name: &str) -> Option<&PortTemplate> {
+        self.ports.iter().find(|&p| p.name == name)
     }
 }
 
-/// GroupTemplate: defines a body graph and external ports (the group's interface)
-#[derive(Clone, Debug)]
-pub struct GroupTemplate {
-    pub meta: NodeMeta,
-    pub external_ports: Vec<PortTemplate>, // group's inputs/outputs
-    /// Instances: mapping instance-id -> NodeInstanceTemplate (nodes inside the group)
-    /// Use IndexMap for deterministic iteration order (useful for deterministic compilation)
-    pub nodes: IndexMap<Uuid, NodeInstanceTemplate>,
-    /// Connections internal to the group: from output (node, port id) to input (node, port id)
-    pub connections: Vec<ConnectionTemplate>,
-}
-
-impl GroupTemplate {
-    pub fn new(name: &str, description: Option<&str>, external_ports: Vec<PortTemplate>) -> Self {
-        Self {
-            meta: NodeMeta::new(name, description.map(|s| s.to_string())),
-            external_ports,
-            nodes: IndexMap::new(),
-            connections: Vec::new(),
-        }
-    }
-    pub fn resolve_port_ref<'a>(
-        &'a self,
-        node_id: Uuid,
-        port_name: &str,
-    ) -> Result<PortRef, String> {
-        let node = self.nodes.get(&node_id)
-            .ok_or_else(|| format!("Unknown node {node_id} in group"))?;
-
-        let port = node.ports.iter()
-            .find(|p| p.name == port_name)
-            .ok_or_else(|| format!("Unknown port {port_name} on node {node_id}"))?;
-
-        Ok(PortRef {
-            node_id,
-            port_name: port.name.clone(),
-            port_type: port.port_type,
-        })
-    }
-
-    pub fn add_node(&mut self, instance: NodeInstanceTemplate) {
-        self.nodes.insert(instance.instance_id, instance);
-    }
-
-    pub fn add_connection(&mut self, conn: ConnectionTemplate) {
-        self.connections.push(conn);
+impl PartialEq for ItemTemplate {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
     }
 }
 
-/// A node *instance* inside a group template (refers to a NodeTemplate id)
-#[derive(Clone, Debug)]
-pub struct NodeInstanceTemplate {
-    pub instance_id: Uuid,
-    pub template_id: Uuid, // NodeTemplate id
-    pub name_hint: Option<String>,
+#[derive(Debug, Clone)]
+pub struct ItemInstanceTemplate {
+    // Group template
+    pub parent_id: TemplateID,
 }
 
-/// A connection inside a group template (all refs are instance-level)
-#[derive(Clone, Debug)]
+/// -------------------------
+/// Instances
+/// -------------------------
+#[derive(Debug, Clone)]
+pub struct PortInstance {
+    pub parent_id: InstanceID,
+    pub template_id: TemplatePortID,
+    pub id: InstancePortID,
+}
+
+#[derive(Debug, Clone)]
+pub struct ItemInstance {
+    pub parent_id: InstanceID,
+    pub template_id: TemplateID,
+    pub id: InstanceID,
+    pub ports: 
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Connection {
+    pub from_id: InstancePortID,
+    pub to_id: InstancePortID,
+}
+
+/// -------------------------
+/// References
+/// -------------------------
 pub struct PortRef {
-    pub node_id: Uuid, // if node_id == special GROUP_ID => refers to group external ports (we'll use group-level sentinel)
-    pub port_id: Uuid, // the port template id (local to the referenced node or group)
+    
 }
 
 const GROUP_PORT_SENTINEL: Uuid = Uuid::from_u128(0); // sentinel to represent group-external port refs

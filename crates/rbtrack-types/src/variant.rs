@@ -202,7 +202,7 @@ pub fn convert(value: &Value, to: TypeId) -> Option<Value> {
         .and_then(|f| f(value))
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Copy)]
 pub enum Shape {
     /// scalar (single value)
     Scalar,
@@ -210,7 +210,7 @@ pub enum Shape {
     Vector(Option<usize>),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Copy)]
 pub struct TypeSpec {
     pub base: TypeId,
     pub shape: Shape,
