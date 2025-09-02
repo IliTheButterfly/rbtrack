@@ -5,7 +5,6 @@ use itertools::Itertools;
 use rbtrack_types::{Shape, TypeSpec, Value};
 use rbtrack_types::sync::{Arc, RwLock, Weak};
 use std::fmt::{Debug, Display};
-use std::path::Display;
 use std::{
     any::TypeId,
     collections::{HashMap, HashSet, VecDeque},
@@ -21,28 +20,28 @@ use uuid::Uuid;
 
 
 // ID of a template stored in the registrar
-#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Debug)]
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Debug, Hash)]
 pub struct TemplateID(Uuid);
 
 // ID of an instance inside a group
-#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Debug)]
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Debug, Hash)]
 pub struct InstanceID(Uuid);
 
 // ID of a template port within an item template
-#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Debug)]
-pub struct TemplatePortID(Uuid);
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Debug, Hash)]
+pub struct PortTemplateID(Uuid);
 
 // ID of a instance port within an item instance
-#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Debug)]
-pub struct InstancePortID(Uuid);
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Debug, Hash)]
+pub struct PortInstanceID(Uuid);
 
 // Helper enum for diagnostics
-#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Debug)]
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Debug, Hash)]
 pub enum ItemID {
     Template(TemplateID),
     Instance(InstanceID),
-    TemplatePort(TemplatePortID),
-    InstancePort(InstancePortID),
+    PortTemplate(PortTemplateID),
+    PortInstance(PortInstanceID),
 }
 
 impl Display for ItemID {
@@ -50,8 +49,8 @@ impl Display for ItemID {
         match &self {
             Self::Template(id) => write!(f, "Template: {:?}", id.0.to_string().get(..6)),
             Self::Instance(id) => write!(f, "Instance: {:?}", id.0.to_string().get(..6)),
-            Self::TemplatePort(id) => write!(f, "TemplatePort: {:?}", id.0.to_string().get(..6)),
-            Self::InstancePort(id) => write!(f, "InstancePort: {:?}", id.0.to_string().get(..6)),
+            Self::PortTemplate(id) => write!(f, "TemplatePort: {:?}", id.0.to_string().get(..6)),
+            Self::PortInstance(id) => write!(f, "InstancePort: {:?}", id.0.to_string().get(..6)),
         }
     }
 }
@@ -98,20 +97,26 @@ impl Debug for Diagnostic {
 /// -------------------------
 /// Templates
 /// -------------------------
+ 
+// Direction of port
 #[derive(Clone, Debug, PartialEq, Copy)]
 pub enum PortDirection {
     Input,
     Output,
 }
 
+// Template of a port
 #[derive(Clone, Debug)]
 pub struct PortTemplate {
-    // ItemTemplate ID
+    // ID of the node template that has this port
     pub parent_id: TemplateID,
     // ID of this port template
-    pub id: TemplatePortID,
+    pub id: PortTemplateID,
+    // Name of this port
     pub name: String,
+    // Direction of this port
     pub direction: PortDirection,
+    // Type specification of this port
     pub ty: TypeSpec,
     /// For input ports: default value used when dangling (optional)
     pub default: Option<Value>,
@@ -121,7 +126,7 @@ impl PortTemplate {
     pub fn new_input(parent_id: TemplateID, name: &str, ty: TypeSpec, default: Option<Value>) -> Self {
         Self {
             parent_id: parent_id,
-            id: TemplatePortID(Uuid::new_v4()),
+            id: PortTemplateID(Uuid::new_v4()),
             name: name.to_string(),
             direction: PortDirection::Input,
             ty,
@@ -131,7 +136,7 @@ impl PortTemplate {
     pub fn new_output(parent_id: TemplateID, name: &str, ty: TypeSpec) -> Self {
         Self {
             parent_id: parent_id,
-            id: TemplatePortID(Uuid::new_v4()),
+            id: PortTemplateID(Uuid::new_v4()),
             name: name.to_string(),
             direction: PortDirection::Output,
             ty,
@@ -140,14 +145,17 @@ impl PortTemplate {
     }
 }
 
+// Template of an item
 #[derive(Debug, Clone)]
 pub struct ItemTemplate {
     // ID of this item template
     pub id: TemplateID,
+    // Name of this node
     pub name: String,
-    pub ports: Vec<PortTemplate>,
+    // List of ports
+    pub ports: IndexMap<PortTemplateID, PortTemplate>,
     // When used as a group, nodes that are contained by this group
-    pub nodes: Option<Vec<ItemInstance>>,
+    pub nodes: Option<IndexMap<InstanceID, ItemInstance>>,
     // When used as a group, connections within this group
     pub connections: Option<Vec<Connection>>,
 }
@@ -157,7 +165,7 @@ impl ItemTemplate {
         Self {
             id: TemplateID(Uuid::new_v4()),
             name: name.to_string(),
-            ports: vec![],
+            ports: IndexMap::new(),
             nodes: None,
             connections: None,
         }
@@ -167,32 +175,50 @@ impl ItemTemplate {
         Self {
             id: TemplateID(Uuid::new_v4()),
             name: name.to_string(),
-            ports: vec![],
-            nodes: Some(vec![]),
+            ports: IndexMap::new(),
+            nodes: Some(IndexMap::new()),
             connections: Some(vec![]),
         }
     }
 
-    pub fn add_input(&mut self, name: &str, ty: TypeSpec, default: Option<Value>) -> TemplatePortID {
+    pub fn add_input(&mut self, name: &str, ty: TypeSpec, default: Option<Value>) -> PortTemplateID {
         let port = PortTemplate::new_input(self.id, name, ty, default);
         let id = port.id;
-        self.ports.push(port);
+        self.ports.insert(id, port);
         id
     }
 
-    pub fn add_output(&mut self, name: &str, ty: TypeSpec) -> TemplatePortID {
+    pub fn add_output(&mut self, name: &str, ty: TypeSpec) -> PortTemplateID {
         let port = PortTemplate::new_output(self.id, name, ty);
         let id = port.id;
-        self.ports.push(port);
+        self.ports.insert(id, port);
         id
     }
 
-    pub fn port_from_id(&self, id: TemplatePortID) -> Option<&PortTemplate> {
-        self.ports.iter().find(|&p| p.id == id)
+    pub fn port_template_from_id(&self, id: &PortTemplateID) -> Option<&PortTemplate> {
+        self.ports.get(id)
     }
 
-    pub fn port_from_name(&self, name: &str) -> Option<&PortTemplate> {
-        self.ports.iter().find(|&p| p.name == name)
+    pub fn port_template_from_name(&self, name: &str) -> Option<&PortTemplate> {
+        self.ports.values().find(|&p| p.name == name)
+    }
+
+    pub fn item_instance_from_id(&self, id: &InstanceID) -> Option<&ItemInstance> {
+        self.nodes.as_ref()?.get(id)
+    }
+
+    pub fn port_instance_from_id(&self, id: &PortInstanceID) -> Option<&PortInstance> {
+        self.nodes
+            .as_ref()?
+            .values()
+            .find_map(|instance| instance.ports.get(id))
+    }
+
+    pub fn port_instance_from_template_id(&self, item_id: &InstanceID, template_id: &PortTemplateID) -> Option<&PortInstance> {
+        self.nodes
+            .as_ref()?
+            .get(item_id)?
+            .find_port_from_template_id(template_id)
     }
 }
 
@@ -202,116 +228,151 @@ impl PartialEq for ItemTemplate {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct ItemInstanceTemplate {
-    // Group template
-    pub parent_id: TemplateID,
-}
-
 /// -------------------------
 /// Instances
 /// -------------------------
+
+// An instance of a port
 #[derive(Debug, Clone)]
 pub struct PortInstance {
+    // Unique ID of this port instance
+    pub id: PortInstanceID,
+    // ID of the node instance that contains this port
     pub parent_id: InstanceID,
-    pub template_id: TemplatePortID,
-    pub id: InstancePortID,
+    // ID of the port template of this port
+    pub template_id: PortTemplateID,
 }
 
+impl PortInstance {
+    pub fn new(parent_id: &InstanceID, template_id: &PortTemplateID) -> Self {
+        Self {
+            id: PortInstanceID(Uuid::new_v4()),
+            parent_id: *parent_id,
+            template_id: *template_id,
+        }
+    }
+    pub fn from_template(parent_id: &InstanceID, template: &PortTemplate) -> Self {
+        Self::new(parent_id, &template.id)
+    }
+}
+
+// An instance of an item
 #[derive(Debug, Clone)]
 pub struct ItemInstance {
-    pub parent_id: InstanceID,
-    pub template_id: TemplateID,
+    // Unique ID of this instance
     pub id: InstanceID,
-    pub ports: 
+    // Group template
+    pub parent_id: TemplateID,
+    // Template of this node
+    pub template_id: TemplateID,
+    // Display name
+    pub label: String,
+    // Port instances
+    pub ports: IndexMap<PortInstanceID, PortInstance>,
 }
 
+impl ItemInstance {
+    pub fn new(parent_id: &TemplateID, template_id: &TemplateID, label: &str) -> Self {
+        Self {
+            id: InstanceID(Uuid::new_v4()),
+            parent_id: *parent_id,
+            template_id: *template_id,
+            label: label.to_string(),
+            ports: IndexMap::new()
+        }
+    }
+
+    pub fn from_template(parent_id: &TemplateID, template: &ItemTemplate, label: Option<&str>) -> Self {
+        let mut res = Self::new(parent_id, &template.id, label.unwrap_or(&template.name));
+        res.ports.extend(
+            template
+                .ports
+                .values()
+                .map(|pt| {
+                    let pi = PortInstance::from_template(&res.id, pt);
+                    (pi.id, pi)
+                }),
+        );
+        res
+    }
+
+    pub fn find_port_from_template_id(&self, template_id: &PortTemplateID) -> Option<&PortInstance> {
+        self.ports.values().find(|port| port.template_id == template_id)
+    }
+}
+
+// A connection between two port instances
 #[derive(Debug, Clone, PartialEq)]
 pub struct Connection {
-    pub from_id: InstancePortID,
-    pub to_id: InstancePortID,
+    // ID of the source port instance
+    pub from_id: PortInstanceID,
+    // ID of the destination port instance
+    pub to_id: PortInstanceID,
 }
 
 /// -------------------------
 /// References
 /// -------------------------
+
+// Reference to a port instance
 pub struct PortRef {
-    
+    pub instance_id: PortInstanceID,
+    registrar: Weak<RwLock<Registrar>>,
 }
 
-const GROUP_PORT_SENTINEL: Uuid = Uuid::from_u128(0); // sentinel to represent group-external port refs
-
-#[derive(Clone, Debug)]
-pub struct ConnectionTemplate {
-    pub id: Uuid,
-    pub from: PortRef, // must be an output
-    pub to: PortRef,   // must be an input
-}
-
-impl ConnectionTemplate {
-    pub fn new(from: PortRef, to: PortRef) -> Self {
-        Self {
-            id: Uuid::new_v4(),
-            from,
-            to,
+impl PortRef {
+    pub fn connections(&self) -> Vec<PortRef> {
+        if let Some(registrar) = self.registrar.upgrade().and_then(|registrar| registrar.try_read_arc()) {
+            registrar.toolset.find_port_instance(self.instance_id)
         }
     }
 }
+
+const GROUP_PORT_SENTINEL: Uuid = Uuid::from_u128(0); // sentinel to represent group-external port refs
 
 /// -------------------------
 /// Toolset & Registrar
 /// -------------------------
 #[derive(Clone, Debug)]
 pub struct Toolset {
-    pub node_templates: IndexMap<Uuid, NodeTemplate>,
-    pub group_templates: IndexMap<Uuid, GroupTemplate>,
+    pub node_templates: IndexMap<TemplateID, ItemTemplate>,
 }
 
 impl Toolset {
     pub fn new() -> Self {
         Self {
             node_templates: IndexMap::new(),
-            group_templates: IndexMap::new(),
         }
     }
 
-    pub fn register_node_template(&mut self, template: NodeTemplate) -> Uuid {
-        let id = template.meta.id;
+    pub fn register_item_template(&mut self, template: ItemTemplate) -> TemplateID {
+        let id = template.id;
         self.node_templates.insert(id, template);
         id
     }
 
-    pub fn register_group_template(&mut self, group: GroupTemplate) -> Uuid {
-        let id = group.meta.id;
-        self.group_templates.insert(id, group);
-        id
+    pub fn find_item_template(&self, id: &TemplateID) -> Option<&ItemTemplate> {
+        self.node_templates.get(id)
     }
 
-    /// NEW:
-    /// Find a port id (Uuid) inside a node template by port name.
-    pub fn lookup_port_id_in_node_template(
-        &self,
-        template_id: Uuid,
-        port_name: &str,
-    ) -> Option<Uuid> {
+    pub fn find_item_instance(&self, id: &InstanceID) -> Option<&ItemInstance> {
         self.node_templates
-            .get(&template_id)
-            .and_then(|nt| nt.ports.iter().find(|p| p.name == port_name).map(|p| p.id))
+            .values()
+            .find_map(|template| template.item_instance_from_id(id))
     }
 
-    /// NEW:
-    /// Find a port id (Uuid) inside a group template's external ports by port name.
-    pub fn lookup_port_id_in_group_template(
-        &self,
-        group_id: Uuid,
-        port_name: &str,
-    ) -> Option<Uuid> {
-        self.group_templates.get(&group_id).and_then(|g| {
-            g.external_ports
-                .iter()
-                .find(|p| p.name == port_name)
-                .map(|p| p.id)
-        })
+    pub fn find_port_template(&self, id: &PortTemplateID) -> Option<&PortTemplate> {
+        self.node_templates
+            .values()
+            .find_map(|template| template.port_template_from_id(id))
+    }
+
+    pub fn find_port_instance(&self, id: &PortInstanceID) -> Option<&PortInstance> {
+        self.node_templates
+            .values()
+            .find_map(|template| {
+                template.nodes.as_ref()?.values().find_map(|inst| inst.ports.get(id))
+            })
     }
 }
 
@@ -319,7 +380,7 @@ impl Toolset {
 #[derive(Clone, Debug)]
 pub struct Registrar {
     pub toolset: Toolset,
-    pub entry_group: Option<Uuid>, // GroupTemplate id
+    pub entry_group: Option<TemplateID>, // GroupTemplate id
 }
 
 impl Registrar {
@@ -330,449 +391,10 @@ impl Registrar {
         }
     }
 
-    pub fn set_entry_point(&mut self, group_id: Uuid) {
+    pub fn set_entry_point(&mut self, group_id: TemplateID) {
         self.entry_group = Some(group_id);
     }
 
-    /// Resolve a (node instance id or group sentinel) + port name into a PortRef.
-    /// Returns a Diagnostic on failure to ease UI error reporting.
-    pub fn resolve_port_ref(
-        &self,
-        group: &GroupTemplate,
-        node_id: Uuid,
-        port_name: &str,
-    ) -> Result<PortRef, Diagnostic> {
-        // group external port
-        if node_id == GROUP_PORT_SENTINEL {
-            if let Some(p) = group.external_ports.iter().find(|p| p.name == port_name) {
-                return Ok(PortRef {
-                    node_id: GROUP_PORT_SENTINEL,
-                    port_id: p.id,
-                });
-            } else {
-                return Err(Diagnostic {
-                    severity: Severity::Error,
-                    message: format!(
-                        "Group '{}' has no external port named '{}'",
-                        group.meta.name, port_name
-                    ),
-                    related_ids: vec![group.meta.id],
-                });
-            }
-        }
-
-        // find the NodeInstanceTemplate
-        if let Some(inst) = group.nodes.get(&node_id) {
-            // lookup node template
-            if let Some(nt) = self.toolset.node_templates.get(&inst.template_id) {
-                // find port on template
-                if let Some(pid) = nt.find_port_id_by_name(port_name, None) {
-                    return Ok(PortRef {
-                        node_id,
-                        port_id: pid,
-                    });
-                } else {
-                    return Err(Diagnostic {
-                        severity: Severity::Error,
-                        message: format!(
-                            "Node instance '{}' (template '{}') has no port named '{}'",
-                            inst.instance_id, nt.meta.name, port_name
-                        ),
-                        related_ids: vec![inst.instance_id, nt.meta.id],
-                    });
-                }
-            } else {
-                return Err(Diagnostic {
-                    severity: Severity::Error,
-                    message: format!(
-                        "Node template '{}' (for instance {}) not found in toolset",
-                        inst.template_id, inst.instance_id
-                    ),
-                    related_ids: vec![inst.instance_id, inst.template_id],
-                });
-            }
-        } else {
-            return Err(Diagnostic {
-                severity: Severity::Error,
-                message: format!("Node instance {} not found in group {}", node_id, group.meta.name),
-                related_ids: vec![node_id, group.meta.id],
-            });
-        }
-    }
-
-    /// Convenience to add a connection by node/port names.
-    /// `from_node` and `to_node` may be GROUP_PORT_SENTINEL to refer to group external ports.
-    /// Returns Ok(connection_id) or Err(diagnostic) (the function will not mutate if it fails).
-    pub fn add_connection_by_names(
-        &mut self,
-        group_id: Uuid,
-        from_node: Uuid,
-        from_port_name: &str,
-        to_node: Uuid,
-        to_port_name: &str,
-    ) -> Result<Uuid, Diagnostic> {
-        // get group mutably
-        let group = match self.toolset.group_templates.get_mut(&group_id) {
-            Some(g) => g,
-            None => {
-                return Err(Diagnostic {
-                    severity: Severity::Error,
-                    message: format!("Group template {} not found", group_id),
-                    related_ids: vec![group_id],
-                })
-            }
-        };
-
-        // resolve both ends using non-mutable path (we only need &GroupTemplate)
-        let from_ref = match self.resolve_port_ref(&*group, from_node, from_port_name) {
-            Ok(r) => r,
-            Err(d) => return Err(d),
-        };
-        let to_ref = match self.resolve_port_ref(&*group, to_node, to_port_name) {
-            Ok(r) => r,
-            Err(d) => return Err(d),
-        };
-
-        // Basic direction sanity check: ensure resolved templates have matching directions
-        // Find PortTemplate for both to check direction
-        let get_port_template = |node_id: Uuid, port_id: Uuid|
-         -> Option<PortTemplate> {
-            if node_id == GROUP_PORT_SENTINEL {
-                group.external_ports.iter().find(|p| p.id == port_id).cloned()
-            } else {
-                group
-                    .nodes
-                    .get(&node_id)
-                    .and_then(|inst| self.toolset.node_templates.get(&inst.template_id))
-                    .and_then(|nt| nt.ports.iter().find(|p| p.id == port_id).cloned())
-            }
-        };
-
-        let from_pt = get_port_template(from_ref.node_id, from_ref.port_id);
-        let to_pt = get_port_template(to_ref.node_id, to_ref.port_id);
-
-        match (&from_pt, &to_pt) {
-            (Some(f), Some(t)) => {
-                if f.direction != PortDirection::Output {
-                    return Err(Diagnostic {
-                        severity: Severity::Error,
-                        message: format!("Resolved 'from' port '{}' is not an output", f.name),
-                        related_ids: vec![f.id],
-                    });
-                }
-                if t.direction != PortDirection::Input {
-                    return Err(Diagnostic {
-                        severity: Severity::Error,
-                        message: format!("Resolved 'to' port '{}' is not an input", t.name),
-                        related_ids: vec![t.id],
-                    });
-                }
-            }
-            _ => {
-                // one of the ports disappeared between resolve and now (unlikely), but handle gracefully
-                return Err(Diagnostic {
-                    severity: Severity::Error,
-                    message: "Failed to fetch port templates after resolution".to_string(),
-                    related_ids: vec![group.meta.id],
-                });
-            }
-        }
-
-        // All good — create connection and push to group's connections
-        let conn = ConnectionTemplate::new(from_ref, to_ref);
-        let conn_id = conn.id;
-        group.add_connection(conn);
-        Ok(conn_id)
-    }
-
-    /// Validate the whole graph starting at entry point.
-    /// Collect diagnostics per-group and return map group_id -> diagnostics
-    pub fn validate(&self) -> HashMap<Uuid, Vec<Diagnostic>> {
-        // (existing validate impl unchanged)
-        let mut diagnostics_map: HashMap<Uuid, Vec<Diagnostic>> = HashMap::new();
-
-        if let Some(entry_id) = self.entry_group {
-            // BFS/DFS through group templates reachable from entry to validate each
-            let mut visited: HashSet<Uuid> = HashSet::new();
-            let mut queue: VecDeque<Uuid> = VecDeque::new();
-            queue.push_back(entry_id);
-
-            while let Some(gid) = queue.pop_front() {
-                if visited.contains(&gid) {
-                    continue;
-                }
-                visited.insert(gid);
-
-                if let Some(group) = self.toolset.group_templates.get(&gid) {
-                    let diag = self.validate_group(group);
-                    diagnostics_map.insert(gid, diag);
-
-                    // discover referenced groups from node instances inside this group
-                    for (_inst_id, inst) in group.nodes.iter() {
-                        if let Some(node_t) = self.toolset.node_templates.get(&inst.template_id) {
-                            match &node_t.kind {
-                                NodeTemplateKind::Group(inner_gid) => {
-                                    queue.push_back(*inner_gid);
-                                }
-                                _ => {}
-                            }
-                        } else {
-                            // missing template diagnostic
-                            diagnostics_map.entry(gid).or_default().push(Diagnostic {
-                                severity: Severity::Error,
-                                message: format!(
-                                    "Node instance template missing: {}",
-                                    inst.template_id
-                                ),
-                                related_ids: vec![inst.instance_id, gid],
-                            });
-                        }
-                    }
-                } else {
-                    diagnostics_map.entry(gid).or_default().push(Diagnostic {
-                        severity: Severity::Error,
-                        message: format!("Referenced group template not found: {}", gid),
-                        related_ids: vec![gid],
-                    });
-                }
-            }
-        } else {
-            // no entry point
-            diagnostics_map.insert(
-                Uuid::nil(),
-                vec![Diagnostic {
-                    severity: Severity::Error,
-                    message: "No entry group set in registrar".to_string(),
-                    related_ids: vec![],
-                }],
-            );
-        }
-
-        diagnostics_map
-    }
-
-    /// Validate a single group template: type-check connections, detect cycles, check port directions and dangling inputs.
-    fn validate_group(&self, group: &GroupTemplate) -> Vec<Diagnostic> {
-        let mut diags: Vec<Diagnostic> = Vec::new();
-
-        // Build quick maps: node_instance_id -> template, node_instance_id -> node template's ports map
-        // Also treat group-level external ports as node with id == GROUP_PORT_SENTINEL
-        let mut instance_template_map: HashMap<Uuid, &NodeTemplate> = HashMap::new();
-        for (_inst_id, inst) in group.nodes.iter() {
-            if let Some(nt) = self.toolset.node_templates.get(&inst.template_id) {
-                instance_template_map.insert(inst.instance_id, nt);
-            } else {
-                diags.push(Diagnostic {
-                    severity: Severity::Error,
-                    message: format!("Missing node template for instance {}", inst.instance_id),
-                    related_ids: vec![inst.instance_id, inst.template_id],
-                });
-            }
-        }
-
-        // helper to find a PortTemplate by node id + port id
-        let find_port = |node_id: Uuid,
-                         port_id: Uuid|
-         -> Option<(
-            &PortTemplate,
-            Uuid, /*owner template id for more context*/
-        )> {
-            if node_id == GROUP_PORT_SENTINEL {
-                // group-level port
-                group
-                    .external_ports
-                    .iter()
-                    .find(|p| p.id == port_id)
-                    .map(|p| (p, group.meta.id))
-            } else {
-                instance_template_map.get(&node_id).and_then(|nt| {
-                    nt.ports
-                        .iter()
-                        .find(|p| p.id == port_id)
-                        .map(|p| (p, nt.meta.id))
-                })
-            }
-        };
-
-        // Validate connections: direction, existance, and type compatibility
-        for conn in group.connections.iter() {
-            // Check from & to port exist
-            let from_port_opt = find_port(conn.from.node_id, conn.from.port_id);
-            let to_port_opt = find_port(conn.to.node_id, conn.to.port_id);
-
-            if from_port_opt.is_none() {
-                diags.push(Diagnostic {
-                    severity: Severity::Error,
-                    message: format!(
-                        "Connection from-port not found in group {}: {:?}",
-                        group.meta.name, conn.from
-                    ),
-                    related_ids: vec![conn.id, group.meta.id],
-                });
-                continue;
-            }
-            if to_port_opt.is_none() {
-                diags.push(Diagnostic {
-                    severity: Severity::Error,
-                    message: format!(
-                        "Connection to-port not found in group {}: {:?}",
-                        group.meta.name, conn.to
-                    ),
-                    related_ids: vec![conn.id, group.meta.id],
-                });
-                continue;
-            }
-
-            let (from_port, from_owner_template) = from_port_opt.unwrap();
-            let (to_port, to_owner_template) = to_port_opt.unwrap();
-
-            // check that 'from' is an output and 'to' is an input
-            if from_port.direction != PortDirection::Output {
-                diags.push(Diagnostic {
-                    severity: Severity::Error,
-                    message: format!(
-                        "Connection 'from' port is not an output: {} (owner template {})",
-                        from_port.name, from_owner_template
-                    ),
-                    related_ids: vec![from_port.id, conn.id],
-                });
-            }
-            if to_port.direction != PortDirection::Input {
-                diags.push(Diagnostic {
-                    severity: Severity::Error,
-                    message: format!(
-                        "Connection 'to' port is not an input: {} (owner template {})",
-                        to_port.name, to_owner_template
-                    ),
-                    related_ids: vec![to_port.id, conn.id],
-                });
-            }
-
-            // type compatibility: base type must match; shape rules:
-            // - scalar -> scalar OK if same base
-            // - scalar -> vector OK (broadcast)
-            // - vector -> vector OK if base same and (either vector length matches or either is variable-length)
-            // - vector -> scalar NOT OK (unless vector length == 1 or you allow reduction — we treat as error here)
-            let from_ty = &from_port.ty;
-            let to_ty = &to_port.ty;
-
-            if from_ty.base != to_ty.base {
-                diags.push(Diagnostic {
-                    severity: Severity::Error,
-                    message: format!(
-                        "Type base mismatch: {} -> {}",
-                        format_type(from_ty),
-                        format_type(to_ty)
-                    ),
-                    related_ids: vec![from_port.id, to_port.id, conn.id],
-                });
-            } else {
-                // base same, check shape compatibility
-                match (&from_ty.shape, &to_ty.shape) {
-                    (Shape::Scalar, Shape::Scalar) => { /* ok */ }
-                    (Shape::Scalar, Shape::Vector(_)) => { /* broadcast OK */ }
-                    (Shape::Vector(flen), Shape::Vector(tlen)) => {
-                        // OK if either target is variable-length, or both equal, or source variable length -> target fixed ambiguous; we allow if equal or target variable
-                        let ok = match (flen, tlen) {
-                            (_, None) => true,       // target variable => ok
-                            (None, Some(_)) => true, // source variable => assume runtime N fits; allow
-                            (Some(a), Some(b)) => a == b,
-                        };
-                        if !ok {
-                            diags.push(Diagnostic {
-                                severity: Severity::Error,
-                                message: format!(
-                                    "Vector length mismatch: {} -> {}",
-                                    format_type(from_ty),
-                                    format_type(to_ty)
-                                ),
-                                related_ids: vec![from_port.id, to_port.id, conn.id],
-                            });
-                        }
-                    }
-                    (Shape::Vector(_), Shape::Scalar) => {
-                        diags.push(Diagnostic {
-                            severity: Severity::Error,
-                            message: format!(
-                                "Cannot connect vector -> scalar without reduction: {} -> {}",
-                                format_type(from_ty),
-                                format_type(to_ty)
-                            ),
-                            related_ids: vec![from_port.id, to_port.id, conn.id],
-                        });
-                    }
-                }
-            }
-        }
-
-        // Dangling input ports: allowed — just ensure they exist (they do), optionally check default types are compatible
-        // for ext_port in &group.external_ports {
-        //     if ext_port.direction == PortDirection::Input {
-        //         // if default exists, ensure default's type matches port type
-        //         if let Some(default_val) = &ext_port.default {
-        //             if !value_matches_type(default_val, &ext_port.ty) {
-        //                 diags.push(Diagnostic {
-        //                     severity: Severity::Error,
-        //                     message: format!("Default value type mismatch for group external port {} ({})", ext_port.name, format_type(&ext_port.ty)),
-        //                     related_ids: vec![ext_port.id, group.meta.id],
-        //                 });
-        //             }
-        //         }
-        //     }
-        // }
-
-        // Detect cycles in the flattened dependency graph implied by connections (simple topological check)
-        // Build adjacency over node instance ids (including GROUP_PORT_SENTINEL as needed)
-        // For cycle detection we only consider internal node instances (not group port sentinel).
-        let mut adj: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
-        let mut indeg: HashMap<Uuid, usize> = HashMap::new();
-
-        // Initialize nodes
-        for (node_id, _inst) in group.nodes.iter() {
-            adj.insert(*node_id, Vec::new());
-            indeg.insert(*node_id, 0);
-        }
-
-        for conn in &group.connections {
-            // from.node -> to.node edge (ignore group-level sentinel edges for cycle detection)
-            if conn.from.node_id != GROUP_PORT_SENTINEL && conn.to.node_id != GROUP_PORT_SENTINEL {
-                adj.entry(conn.from.node_id)
-                    .or_default()
-                    .push(conn.to.node_id);
-                *indeg.entry(conn.to.node_id).or_default() += 1;
-            }
-        }
-
-        // Kahn's algorithm
-        let mut q: VecDeque<Uuid> = indeg
-            .iter()
-            .filter(|(_, d)| **d == 0)
-            .map(|(k, _)| *k)
-            .collect();
-        let mut visited_count = 0usize;
-        while let Some(n) = q.pop_front() {
-            visited_count += 1;
-            if let Some(neis) = adj.get(&n) {
-                for &m in neis {
-                    if let Some(d) = indeg.get_mut(&m) {
-                        *d -= 1;
-                        if *d == 0 {
-                            q.push_back(m);
-                        }
-                    }
-                }
-            }
-        }
-        if visited_count != adj.len() {
-            diags.push(Diagnostic {
-                severity: Severity::Error,
-                message: "Cycle detected inside group template".to_string(),
-                related_ids: vec![group.meta.id],
-            });
-        }
-
-        diags
-    }
 }
 
 /// -------------------------
