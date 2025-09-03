@@ -6,6 +6,8 @@ use parking_lot::lock_api;
 use rbtrack_types::{Shape, TypeSpec, Value};
 use rbtrack_types::sync::{Arc, RwLock, Weak, ArcRwLockReadGuard, ArcRwLockWriteGuard, RawRwLock};
 use std::fmt::{Debug, Display};
+use std::marker::PhantomData;
+use std::str::Matches;
 use std::{
     any::TypeId,
     collections::{HashMap, HashSet, VecDeque},
@@ -196,30 +198,71 @@ impl ItemTemplate {
         id
     }
 
-    pub fn port_template_from_id(&self, id: &PortTemplateID) -> Option<&PortTemplate> {
+    pub fn add_item(&mut self, item: &ItemTemplate, label: Option<&str>) -> Option<InstanceID> {
+        let instance = ItemInstance::from_template(&self.id, item, label);
+        let id = instance.id;
+        self.nodes.as_mut()?.insert(id, instance.clone());
+        Some(id)
+    }
+
+    pub fn remove_item_from_id(&mut self, id: &InstanceID) -> Option<bool> {
+        Some(self.nodes.as_mut()?.shift_remove(id).is_some())
+    }
+
+    pub fn port_template_from_id<'a>(&'a self, id: &PortTemplateID) -> Option<&'a PortTemplate> {
         self.ports.get(id)
     }
 
-    pub fn port_template_from_name(&self, name: &str) -> Option<&PortTemplate> {
+    pub fn port_template_from_id_mut<'a>(&'a mut self, id: &PortTemplateID) -> Option<&'a mut PortTemplate> {
+        self.ports.get_mut(id)
+    }
+
+    pub fn port_template_from_name<'a>(&'a self, name: &str) -> Option<&'a PortTemplate> {
         self.ports.values().find(|&p| p.name == name)
     }
 
-    pub fn item_instance_from_id(&self, id: &InstanceID) -> Option<&ItemInstance> {
+    pub fn port_template_from_name_mut<'a>(&'a mut self, name: &str) -> Option<&'a mut PortTemplate> {
+        self.ports.values_mut().find(|p| p.name == name)
+    }
+
+    pub fn item_instance_from_id<'a>(&'a self, id: &InstanceID) -> Option<&'a ItemInstance> {
         self.nodes.as_ref()?.get(id)
     }
 
-    pub fn port_instance_from_id(&self, id: &PortInstanceID) -> Option<&PortInstance> {
+    pub fn item_instance_from_id_mut<'a>(&'a mut self, id: &InstanceID) -> Option<&'a mut ItemInstance> {
+        self.nodes.as_mut()?.get_mut(id)
+    }
+
+    pub fn port_instance_from_id<'a>(&'a self, id: &PortInstanceID) -> Option<&'a PortInstance> {
         self.nodes
             .as_ref()?
             .values()
             .find_map(|instance| instance.ports.get(id))
     }
 
-    pub fn port_instance_from_template_id(&self, item_id: &InstanceID, template_id: &PortTemplateID) -> Option<&PortInstance> {
+    pub fn port_instance_from_id_mut<'a>(&'a mut self, id: &PortInstanceID) -> Option<&'a mut PortInstance> {
+        self.nodes
+            .as_mut()?
+            .values_mut()
+            .find_map(|instance| instance.ports.get_mut(id))
+    }
+
+    pub fn port_instance_from_template_id<'a>(&'a self, item_id: &InstanceID, template_id: &PortTemplateID) -> Option<&'a PortInstance> {
         self.nodes
             .as_ref()?
             .get(item_id)?
             .find_port_from_template_id(template_id)
+    }
+
+    pub fn port_instance_from_template_id_mut<'a>(&'a mut self, item_id: &InstanceID, template_id: &PortTemplateID) -> Option<&'a mut PortInstance> {
+        self.nodes
+            .as_mut()?
+            .get_mut(item_id)?
+            .find_port_from_template_id_mut(template_id)
+    }
+
+    pub fn is_group(&self) -> bool {
+        self.nodes.is_some()
     }
 }
 
@@ -297,18 +340,51 @@ impl ItemInstance {
         res
     }
 
-    pub fn find_port_from_template_id(&self, template_id: &PortTemplateID) -> Option<&PortInstance> {
-        self.ports.values().find(|port| port.template_id == template_id)
+    pub fn find_port_from_id<'a>(&'a self, id: &PortInstanceID) -> Option<&'a PortInstance> {
+        self.ports.get(id)
+    }
+
+    pub fn find_port_from_id_mut<'a>(&'a mut self, id: &PortInstanceID) -> Option<&'a mut PortInstance> {
+        self.ports.get_mut(id)
+    }
+
+    pub fn find_port_from_template_id<'a>(&'a self, template_id: &PortTemplateID) -> Option<&'a PortInstance> {
+        self.ports.values().find(|port| &port.template_id == template_id)
+    }
+
+    pub fn find_port_from_template_id_mut<'a>(&'a mut self, template_id: &PortTemplateID) -> Option<&'a mut PortInstance> {
+        self.ports.values_mut().find(|port| &port.template_id == template_id)
     }
 }
 
 // A connection between two port instances
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Connection {
     // ID of the source port instance
     pub from_id: PortInstanceID,
     // ID of the destination port instance
     pub to_id: PortInstanceID,
+}
+
+impl Connection {
+    pub fn new(from_id: &PortInstanceID, to_id: &PortInstanceID) -> Self {
+        Self {
+            from_id: *from_id,
+            to_id: *to_id,
+        }
+    }
+
+    pub fn from_ports(from: &PortInstance, to: &PortInstance) -> Self {
+        Self::new(&from.id, &to.id)
+    }
+
+    pub fn contains_id(&self, id: &PortInstanceID) -> bool {
+        &self.from_id == id || &self.to_id == id
+    }
+
+    pub fn contains_port(&self, port: &PortInstance) -> bool {
+        self.contains_id(&port.id)
+    }
 }
 
 /// -------------------------
@@ -319,13 +395,37 @@ pub struct Connection {
 // This reference cannot modify the registrar
 #[derive(Debug, Clone)]
 pub struct PortInstanceRef {
-    pub instance_id: PortInstanceID,
-    registrar: Weak<Registrar>,
+    pub id: PortInstanceID,
+    registrar: Weak<RwLock<Registrar>>,
 }
 
-pub struct PortInstanceReadGuard<R: lock_api::RawRwLock> {
-    guard: ArcRwLockReadGuard<R, Registrar>,
+impl PortInstanceRef {
+    pub fn new(registrar: Weak<RwLock<Registrar>>, instance_id: &PortInstanceID) -> Self {
+        Self {
+            id: *instance_id,
+            registrar: registrar,
+        }
+    }
+
+    pub fn get_instance(&self) -> Option<PortInstanceReadGuard> {
+        let arc = self.registrar.upgrade()?;
+        let guard = arc.read_arc();
+        let id = self.id;
+        Some(PortInstanceReadGuard { guard, id })
+    }
+    
+}
+
+pub struct PortInstanceReadGuard {
+    guard: ArcRwLockReadGuard<RawRwLock, Registrar>,
     id: PortInstanceID,
+}
+
+impl std::ops::Deref for PortInstanceReadGuard {
+    type Target = PortInstance;
+    fn deref(&self) -> &Self::Target {
+        self.guard.
+    }
 }
 
 // Reference to an item instance
@@ -336,36 +436,53 @@ pub struct ItemInstanceRef {
     registrar: Weak<RwLock<Registrar>>,
 }
 
-pub struct ItemInstanceReadGuard<R: lock_api::RawRwLock> {
-    guard: ArcRwLockReadGuard<R, Registrar>,
-    id: InstanceID,
-}
-
-pub struct ItemInstanceWriteGuard<R: lock_api::RawRwLock> {
-    guard: ArcRwLockWriteGuard<R, Registrar>,
-    id: InstanceID,
-}
-
 impl ItemInstanceRef {
-    pub fn read<R: lock_api::RawRwLock>(&self) -> Option<ItemInstanceReadGuard<R>> {
-        let arc = self.registrar.upgrade()?;
-        let guard = arc.read_arc();
-        Some(ItemInstanceReadGuard<R> { guard, id: self.id })
-    }
 
-    pub fn write(&self) -> Option<ItemInstanceWriteGuard> {
-        let arc = self.registrar.upgrade()?;
-        let guard = ArcRwLockWriteGuard::new(arc);
-        Some(ItemInstanceWriteGuard { guard, id: self.id })
-    }
 }
 
 // Reference to an item instance
 // This reference can modify the registrar
 #[derive(Debug, Clone)]
 pub struct ItemTemplateRef {
-    pub instance_id: TemplateID,
+    pub id: TemplateID,
     registrar: Weak<RwLock<Registrar>>,
+}
+
+impl ItemTemplateRef {
+    pub fn new(registrar: Weak<RwLock<Registrar>>, template_id: &TemplateID) -> Self {
+        Self {
+            id: *template_id,
+            registrar: registrar,
+        }
+    }
+
+    pub fn get_name(&self) -> Option<String> {
+        let ptr = self.registrar.upgrade()?;
+        let registrar = ptr.read();
+        let item = registrar.toolset.find_item_template(&self.id)?;
+        Some(item.name.clone())
+    }
+
+    pub fn get_connections(&self) -> Option<Vec<Connection>> {
+        let ptr = self.registrar.upgrade()?;
+        let registrar = ptr.read();
+        let item = registrar.toolset.find_item_template(&self.id)?;
+        item.connections.clone()
+    }
+
+    pub fn is_group(&self) -> Option<bool> {
+        let ptr = self.registrar.upgrade()?;
+        let registrar = ptr.read();
+        let item = registrar.toolset.find_item_template(&self.id)?;
+        Some(item.is_group())
+    }
+
+    pub fn add_input(self, name: &str, ty: TypeSpec, default: Option<Value>) -> Option<PortTemplateID> {
+        let ptr = self.registrar.upgrade()?;
+        let mut registrar = ptr.write();
+        let mut item = registrar.toolset.find_item_template(&self.id)?;
+        Some(item.is_group())
+    }
 }
 
 const GROUP_PORT_SENTINEL: Uuid = Uuid::from_u128(0); // sentinel to represent group-external port refs
@@ -395,10 +512,20 @@ impl Toolset {
         self.node_templates.get(id)
     }
 
+    pub fn find_item_template_mut(&mut self, id: &TemplateID) -> Option<&mut ItemTemplate> {
+        self.node_templates.get_mut(id)
+    }
+
     pub fn find_item_instance(&self, id: &InstanceID) -> Option<&ItemInstance> {
         self.node_templates
             .values()
             .find_map(|template| template.item_instance_from_id(id))
+    }
+
+    pub fn find_item_instance_mut(&mut self, id: &InstanceID) -> Option<&mut ItemInstance> {
+        self.node_templates
+            .values()
+            .find_map(|template| template.item_instance_from_id_mut(id))
     }
 
     pub fn find_port_template(&self, id: &PortTemplateID) -> Option<&PortTemplate> {
@@ -407,12 +534,54 @@ impl Toolset {
             .find_map(|template| template.port_template_from_id(id))
     }
 
+    pub fn find_port_template_mut(&mut self, id: &PortTemplateID) -> Option<&mut PortTemplate> {
+        self.node_templates
+            .values()
+            .find_map(|template| template.port_template_from_id_mut(id))
+    }
+
     pub fn find_port_instance(&self, id: &PortInstanceID) -> Option<&PortInstance> {
         self.node_templates
             .values()
             .find_map(|template| {
-                template.nodes.as_ref()?.values().find_map(|inst| inst.ports.get(id))
+                template.nodes.as_ref()?.values().find_map(|inst| inst.ports.get_mut(id))
             })
+    }
+
+    pub fn find_port_instance_mut(&mut self, id: &PortInstanceID) -> Option<&mut PortInstance> {
+        self.node_templates
+            .values()
+            .find_map(|template| {
+                template.nodes.as_ref()?.values().find_map(|inst| inst.ports.get_mut(id))
+            })
+    }
+}
+
+pub struct ToolsetReadGuard {
+    guard: ArcRwLockReadGuard<RawRwLock, Registrar>,
+}
+
+impl std::ops::Deref for ToolsetReadGuard {
+    type Target = Toolset;
+    fn deref(&self) -> &Self::Target {
+        &self.guard.toolset
+    }
+}
+
+pub struct ToolsetWriteGuard {
+    guard: ArcRwLockWriteGuard<RawRwLock, Registrar>,
+}
+
+impl std::ops::Deref for ToolsetWriteGuard {
+    type Target = Toolset;
+    fn deref(&self) -> &Self::Target {
+        &self.guard.toolset
+    }
+}
+
+impl std::ops::DerefMut for ToolsetWriteGuard {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.guard.toolset
     }
 }
 
@@ -434,7 +603,19 @@ impl Registrar {
     pub fn set_entry_point(&mut self, group_id: TemplateID) {
         self.entry_group = Some(group_id);
     }
+    
+}
 
+pub fn read_toolset(registrar: &Arc<RwLock<Registrar>>) -> ToolsetReadGuard {
+    ToolsetReadGuard {
+        guard: registrar.read_arc(),
+    }
+}
+
+pub fn write_toolset(registrar: &Arc<RwLock<Registrar>>) -> ToolsetWriteGuard {
+    ToolsetWriteGuard {
+        guard: registrar.write_arc(),
+    }
 }
 
 /// -------------------------
@@ -455,158 +636,19 @@ mod tests {
     use rbtrack_types::TypeSpec;
     use uuid::Uuid;
 
-    use crate::ir::{
-        ConnectionTemplate, GROUP_PORT_SENTINEL, GroupTemplate, NodeInstanceTemplate, NodeTemplate,
-        PortRef, PortTemplate, Registrar,
-    };
+    use crate::ir::*;
 
     #[test]
-    fn example_usage() {
-        let mut registrar = Registrar::new();
+    fn creating_template() {
+        let registrar = Arc::new(RwLock::new(Registrar::new()));
 
-        // Atomic templates
-        let int_value_node = {
-            // outputs: value: int
-            let mut t = NodeTemplate::new_atomic(
-                "IntValue",
-                Some("emits an integer value"),
-                vec![PortTemplate::new_output(
-                    "value",
-                    TypeSpec::scalar(TypeId::of::<i32>()),
-                )],
-            );
-            registrar.toolset.register_node_template(t)
+        let main_group = {
+            let mut reg = registrar.write();
+            let main_group = ItemTemplate::new_group("My group");
+            let id = main_group.id;
+            reg.toolset.register_item_template(main_group);
+            ItemTemplateRef::new(Arc::downgrade(&registrar), &id.clone())
         };
 
-        let int_sum_node = {
-            // inputs: a:int, b:int  outputs: res:int
-            let mut t = NodeTemplate::new_atomic(
-                "IntSum",
-                Some("adds two ints"),
-                vec![
-                    PortTemplate::new_input("a", TypeSpec::scalar(TypeId::of::<i32>()), None),
-                    PortTemplate::new_input("b", TypeSpec::scalar(TypeId::of::<i32>()), None),
-                    PortTemplate::new_output("res", TypeSpec::scalar(TypeId::of::<i32>())),
-                ],
-            );
-            registrar.toolset.register_node_template(t)
-        };
-
-        let int_sub_node = {
-            let mut t = NodeTemplate::new_atomic(
-                "IntSub",
-                Some("subtracts two ints"),
-                vec![
-                    PortTemplate::new_input("a", TypeSpec::scalar(TypeId::of::<i32>()), None),
-                    PortTemplate::new_input("b", TypeSpec::scalar(TypeId::of::<i32>()), None),
-                    PortTemplate::new_output("res", TypeSpec::scalar(TypeId::of::<i32>())),
-                ],
-            );
-            registrar.toolset.register_node_template(t)
-        };
-
-        // After registering atomic node templates (int_value_node, int_sum_node, etc.)
-        let triple_group_id = {
-            let mut group = GroupTemplate::new(
-                "TripleSumGroup",
-                Some("adds three ints using two sums"),
-                vec![
-                    PortTemplate::new_input("a", TypeSpec::scalar(TypeId::of::<i32>()), None),
-                    PortTemplate::new_input("b", TypeSpec::scalar(TypeId::of::<i32>()), None),
-                    PortTemplate::new_input("c", TypeSpec::scalar(TypeId::of::<i32>()), None),
-                    PortTemplate::new_output("res", TypeSpec::scalar(TypeId::of::<i32>())),
-                ],
-            );
-
-            let sum1_inst = NodeInstanceTemplate {
-                instance_id: Uuid::new_v4(),
-                template_id: int_sum_node,
-                name_hint: Some("sum1".into()),
-            };
-            let sum2_inst = NodeInstanceTemplate {
-                instance_id: Uuid::new_v4(),
-                template_id: int_sum_node,
-                name_hint: Some("sum2".into()),
-            };
-
-            group.add_node(sum1_inst.clone());
-            group.add_node(sum2_inst.clone());
-
-            // Now use registrar helpers to add connections by names:
-            // group.a -> sum1.a
-            registrar
-                .add_connection_by_names(
-                    &mut group,
-                    GROUP_PORT_SENTINEL,
-                    "a",
-                    sum1_inst.instance_id,
-                    "a",
-                )
-                .expect("failed to add connection");
-
-            // group.b -> sum1.b
-            registrar
-                .add_connection_by_names(
-                    &mut group,
-                    GROUP_PORT_SENTINEL,
-                    "b",
-                    sum1_inst.instance_id,
-                    "b",
-                )
-                .expect("failed to add connection");
-
-            // sum1.res -> sum2.a
-            registrar
-                .add_connection_by_names(
-                    &mut group,
-                    sum1_inst.instance_id,
-                    "res",
-                    sum2_inst.instance_id,
-                    "a",
-                )
-                .expect("failed to add connection");
-
-            // group.c -> sum2.b
-            registrar
-                .add_connection_by_names(
-                    &mut group,
-                    GROUP_PORT_SENTINEL,
-                    "c",
-                    sum2_inst.instance_id,
-                    "b",
-                )
-                .expect("failed to add connection");
-
-            // sum2.res -> group.res
-            registrar
-                .add_connection_by_names(
-                    &mut group,
-                    sum2_inst.instance_id,
-                    "res",
-                    GROUP_PORT_SENTINEL,
-                    "res",
-                )
-                .expect("failed to add connection");
-
-            registrar.toolset.register_group_template(group)
-        };
-
-        // MainGroup: omitted due to verbosity; in practice you'd build nodes and connections similarly,
-        // referencing node templates by id, using NodeInstanceTemplate entries, and pushing ConnectionTemplate entries.
-
-        // Set entry
-        registrar.set_entry_point(triple_group_id);
-
-        // Validate
-        let diagnostics = registrar.validate();
-        for (gid, diags) in diagnostics {
-            println!("Diagnostics for group {}:", gid);
-            for d in diags {
-                println!(
-                    "  - [{:?}] {} (related: {:?})",
-                    d.severity, d.message, d.related_ids
-                );
-            }
-        }
     }
 }
