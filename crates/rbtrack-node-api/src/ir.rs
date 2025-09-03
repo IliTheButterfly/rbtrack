@@ -2,8 +2,9 @@
 
 use indexmap::IndexMap;
 use itertools::Itertools;
+use parking_lot::lock_api;
 use rbtrack_types::{Shape, TypeSpec, Value};
-use rbtrack_types::sync::{Arc, RwLock, Weak};
+use rbtrack_types::sync::{Arc, RwLock, Weak, ArcRwLockReadGuard, ArcRwLockWriteGuard, RawRwLock};
 use std::fmt::{Debug, Display};
 use std::{
     any::TypeId,
@@ -315,17 +316,56 @@ pub struct Connection {
 /// -------------------------
 
 // Reference to a port instance
-pub struct PortRef {
+// This reference cannot modify the registrar
+#[derive(Debug, Clone)]
+pub struct PortInstanceRef {
     pub instance_id: PortInstanceID,
+    registrar: Weak<Registrar>,
+}
+
+pub struct PortInstanceReadGuard<R: lock_api::RawRwLock> {
+    guard: ArcRwLockReadGuard<R, Registrar>,
+    id: PortInstanceID,
+}
+
+// Reference to an item instance
+// This reference can modify the registrar
+#[derive(Debug, Clone)]
+pub struct ItemInstanceRef {
+    pub id: InstanceID,
     registrar: Weak<RwLock<Registrar>>,
 }
 
-impl PortRef {
-    pub fn connections(&self) -> Vec<PortRef> {
-        if let Some(registrar) = self.registrar.upgrade().and_then(|registrar| registrar.try_read_arc()) {
-            registrar.toolset.find_port_instance(self.instance_id)
-        }
+pub struct ItemInstanceReadGuard<R: lock_api::RawRwLock> {
+    guard: ArcRwLockReadGuard<R, Registrar>,
+    id: InstanceID,
+}
+
+pub struct ItemInstanceWriteGuard<R: lock_api::RawRwLock> {
+    guard: ArcRwLockWriteGuard<R, Registrar>,
+    id: InstanceID,
+}
+
+impl ItemInstanceRef {
+    pub fn read<R: lock_api::RawRwLock>(&self) -> Option<ItemInstanceReadGuard<R>> {
+        let arc = self.registrar.upgrade()?;
+        let guard = arc.read_arc();
+        Some(ItemInstanceReadGuard<R> { guard, id: self.id })
     }
+
+    pub fn write(&self) -> Option<ItemInstanceWriteGuard> {
+        let arc = self.registrar.upgrade()?;
+        let guard = ArcRwLockWriteGuard::new(arc);
+        Some(ItemInstanceWriteGuard { guard, id: self.id })
+    }
+}
+
+// Reference to an item instance
+// This reference can modify the registrar
+#[derive(Debug, Clone)]
+pub struct ItemTemplateRef {
+    pub instance_id: TemplateID,
+    registrar: Weak<RwLock<Registrar>>,
 }
 
 const GROUP_PORT_SENTINEL: Uuid = Uuid::from_u128(0); // sentinel to represent group-external port refs
